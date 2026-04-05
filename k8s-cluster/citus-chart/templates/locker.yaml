@@ -9,8 +9,8 @@ spec:
     selector:
         app: {{ .Values.locker.name }}
     ports:
-        - port: 5432
-          targetPort: 5432
+        - port: {{ .Values.postgres.port }}
+          targetPort: {{ .Values.postgres.port }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -31,8 +31,21 @@ spec:
             containers:
                 - name: postgres
                   image: {{ .Values.image.locker }}
+                  command:
+                      - docker-entrypoint.sh
+                      - postgres
+                      - -c
+                      - wal_level={{ .Values.postgres.config.walLevel }}
+                      - -c
+                      - max_replication_slots={{ .Values.postgres.config.maxReplicationSlots }}
+                      - -c
+                      - max_wal_senders={{ .Values.postgres.config.maxWalSenders }}
+                      - -c
+                      - max_logical_replication_workers={{ .Values.postgres.config.maxLogicalReplicationWorkers }}
+                      - -c
+                      - max_worker_processes={{ .Values.postgres.config.maxWorkerProcesses }}
                   ports:
-                      - containerPort: 5432
+                      - containerPort: {{ .Values.postgres.port }}
                   env:
                       - name: POSTGRES_DB
                         value: "{{ .Values.postgres.db }}"

@@ -2,62 +2,92 @@ namespace: citus
 
 image:
     citus: citusdata/citus:13.0
+    postgres: postgres:18.3
     locker: postgres:18.3
 
 postgres:
     user: postgres
     password: "111"
     db: postgres
+    port: 5432
+    config:
+        walLevel: logical
+        maxReplicationSlots: 10
+        maxWalSenders: 10
+        maxLogicalReplicationWorkers: 10
+        maxWorkerProcesses: 20
+
+masters:
+    - name: master-1
+      serviceName: master-1
+      storageClassName: master-1-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 1
+
+    - name: master-2
+      serviceName: master-2
+      storageClassName: master-2-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 1
+
+    - name: master-3
+      serviceName: master-3
+      storageClassName: master-3-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 1
 
 coordinators:
-    - name: citus-coordinator-1
-      serviceName: citus-coordinator-1
-      storageClassName: citus-coordinator-1-storage
+    - name: coordinator-1
+      serviceName: coordinator-1
+      storageClassName: coordinator-1-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql/18/docker
       replicas: 1
 
-    - name: citus-coordinator-2
-      serviceName: citus-coordinator-2
-      storageClassName: citus-coordinator-2-storage
+    - name: coordinator-2
+      serviceName: coordinator-2
+      storageClassName: coordinator-2-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql/18/docker
       replicas: 1
 
-    - name: citus-coordinator-3
-      serviceName: citus-coordinator-3
-      storageClassName: citus-coordinator-3-storage
+    - name: coordinator-3
+      serviceName: coordinator-3
+      storageClassName: coordinator-3-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql/18/docker
       replicas: 1
 
 workers:
-    - name: citus-worker-1
-      serviceName: citus-worker-1-headless
+    - name: worker-1
+      serviceName: worker-1-headless
       headless: true
-      storageClassName: citus-worker-1-storage
+      storageClassName: worker-1-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql
-      replicas: 5
-      coordinatorName: citus-coordinator-1
+      replicas: 3
+      coordinatorName: coordinator-1
 
-    - name: citus-worker-2
-      serviceName: citus-worker-2-headless
+    - name: worker-2
+      serviceName: worker-2-headless
       headless: true
-      storageClassName: citus-worker-2-storage
+      storageClassName: worker-2-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql
-      replicas: 5
-      coordinatorName: citus-coordinator-2
+      replicas: 3
+      coordinatorName: coordinator-2
 
-    - name: citus-worker-3
-      serviceName: citus-worker-3-headless
+    - name: worker-3
+      serviceName: worker-3-headless
       headless: true
-      storageClassName: citus-worker-3-storage
+      storageClassName: worker-3-storage
       storageSize: 10Gi
       mountPath: /var/lib/postgresql
-      replicas: 5
-      coordinatorName: citus-coordinator-3
+      replicas: 3
+      coordinatorName: coordinator-3
 
 locker:
     enabled: true

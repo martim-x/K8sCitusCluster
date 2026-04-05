@@ -1,4 +1,4 @@
-{{- range .Values.coordinators }}
+{{- range .Values.masters }}
 ---
 apiVersion: v1
 kind: Service
@@ -30,7 +30,7 @@ spec:
         spec:
             containers:
                 - name: {{ .name }}
-                  image: {{ $.Values.image.citus }}
+                  image: {{ $.Values.image.postgres }}
                   command:
                       - docker-entrypoint.sh
                       - postgres
@@ -47,6 +47,8 @@ spec:
                   ports:
                       - containerPort: {{ $.Values.postgres.port }}
                   env:
+                      - name: POSTGRES_DB
+                        value: "{{ $.Values.postgres.db }}"
                       - name: POSTGRES_USER
                         value: "{{ $.Values.postgres.user }}"
                       - name: POSTGRES_PASSWORD

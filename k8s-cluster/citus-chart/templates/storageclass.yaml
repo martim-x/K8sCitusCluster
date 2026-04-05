@@ -1,3 +1,15 @@
+{{- range .Values.masters }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .storageClassName }}
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: false
+{{- end }}
+
 {{- range .Values.coordinators }}
 ---
 apiVersion: storage.k8s.io/v1
