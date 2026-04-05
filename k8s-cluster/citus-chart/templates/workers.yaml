@@ -1,0 +1,62 @@
+{{- range .Values.workers }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: {{ .serviceName }}
+    namespace: {{ $.Values.namespace }}
+spec:
+    {{- if .headless }}
+    clusterIP: None
+    {{- end }}
+    selector:
+        app: {{ .name }}
+    ports:
+        - port: 5432
+          targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+    name: {{ .name }}
+    namespace: {{ $.Values.namespace }}
+spec:
+    serviceName: {{ .serviceName }}
+    replicas: {{ .replicas }}
+    selector:
+        matchLabels:
+            app: {{ .name }}
+    template:
+        metadata:
+            labels:
+                app: {{ .name }}
+                coordinator: {{ .coordinatorName | quote }}
+        spec:
+            containers:
+                - name: {{ .name }}
+                  image: {{ $.Values.image.citus }}
+                  ports:
+                      - containerPort: 5432
+                  env:
+                      - name: POSTGRES_USER
+                        value: "{{ $.Values.postgres.user }}"
+                      - name: POSTGRES_PASSWORD
+                        value: "{{ $.Values.postgres.password }}"
+                      - name: PGUSER
+                        value: "{{ $.Values.postgres.user }}"
+                      - name: PGPASSWORD
+                        value: "{{ $.Values.postgres.password }}"
+                  volumeMounts:
+                      - name: data
+                        mountPath: {{ .mountPath }}
+    volumeClaimTemplates:
+        - metadata:
+              name: data
+          spec:
+              accessModes:
+                  - ReadWriteOnce
+              storageClassName: {{ .storageClassName }}
+              resources:
+                  requests:
+                      storage: {{ .storageSize }}
+{{- end }}

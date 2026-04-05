@@ -1,0 +1,56 @@
+{{- if .Values.locker.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: {{ .Values.locker.serviceName }}
+    namespace: {{ .Values.namespace }}
+spec:
+    selector:
+        app: {{ .Values.locker.name }}
+    ports:
+        - port: 5432
+          targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+    name: {{ .Values.locker.name }}
+    namespace: {{ .Values.namespace }}
+spec:
+    serviceName: {{ .Values.locker.serviceName }}
+    replicas: {{ .Values.locker.replicas }}
+    selector:
+        matchLabels:
+            app: {{ .Values.locker.name }}
+    template:
+        metadata:
+            labels:
+                app: {{ .Values.locker.name }}
+        spec:
+            containers:
+                - name: postgres
+                  image: {{ .Values.image.locker }}
+                  ports:
+                      - containerPort: 5432
+                  env:
+                      - name: POSTGRES_DB
+                        value: "{{ .Values.postgres.db }}"
+                      - name: POSTGRES_USER
+                        value: "{{ .Values.postgres.user }}"
+                      - name: POSTGRES_PASSWORD
+                        value: "{{ .Values.postgres.password }}"
+                  volumeMounts:
+                      - name: data
+                        mountPath: {{ .Values.locker.mountPath }}
+    volumeClaimTemplates:
+        - metadata:
+              name: data
+          spec:
+              accessModes:
+                  - ReadWriteOnce
+              storageClassName: {{ .Values.locker.storageClassName }}
+              resources:
+                  requests:
+                      storage: {{ .Values.locker.storageSize }}
+{{- end }}

@@ -1,0 +1,69 @@
+namespace: citus
+
+image:
+    citus: citusdata/citus:13.0
+    locker: postgres:18.3
+
+postgres:
+    user: postgres
+    password: "111"
+    db: postgres
+
+coordinators:
+    - name: citus-coordinator-1
+      serviceName: citus-coordinator-1
+      storageClassName: citus-coordinator-1-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql/18/docker
+      replicas: 1
+
+    - name: citus-coordinator-2
+      serviceName: citus-coordinator-2
+      storageClassName: citus-coordinator-2-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql/18/docker
+      replicas: 1
+
+    - name: citus-coordinator-3
+      serviceName: citus-coordinator-3
+      storageClassName: citus-coordinator-3-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql/18/docker
+      replicas: 1
+
+workers:
+    - name: citus-worker-1
+      serviceName: citus-worker-1-headless
+      headless: true
+      storageClassName: citus-worker-1-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 5
+      coordinatorName: citus-coordinator-1
+
+    - name: citus-worker-2
+      serviceName: citus-worker-2-headless
+      headless: true
+      storageClassName: citus-worker-2-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 5
+      coordinatorName: citus-coordinator-2
+
+    - name: citus-worker-3
+      serviceName: citus-worker-3-headless
+      headless: true
+      storageClassName: citus-worker-3-storage
+      storageSize: 10Gi
+      mountPath: /var/lib/postgresql
+      replicas: 5
+      coordinatorName: citus-coordinator-3
+
+locker:
+    enabled: true
+    name: pg-locker
+    serviceName: pg-locker
+    storageClassName: pg-locker-storage
+    storageSize: 5Gi
+    mountPath: /var/lib/postgresql
+    replicas: 1
