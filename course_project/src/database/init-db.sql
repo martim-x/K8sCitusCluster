@@ -2141,3 +2141,382 @@ begin
     return v_row;
 exception when others then return null; end;
 $$;
+
+
+-- ============================================================
+-- warn: drop roles in reverse dependency order
+-- ============================================================
+-- drop owned by role_guest;
+-- drop role if exists role_guest;
+-- drop owned by role_user;
+-- drop role if exists role_user;
+-- drop owned by role_manager;
+-- drop role if exists role_manager;
+-- drop owned by role_admin;
+-- drop role if exists role_admin;
+
+
+-- ============================================================
+-- ROLES
+-- ============================================================
+create role role_guest   nologin;
+create role role_user    nologin;
+create role role_manager nologin;
+create role role_admin   nologin;
+
+
+-- ============================================================
+-- GRANT EXECUTE на util-функции
+-- все роли могут вызывать utils через CRUD-функции
+-- ============================================================
+grant execute on function sanitize_text(text, text)                 to role_guest, role_user, role_manager, role_admin;
+grant execute on function is_record_active(text, uuid)              to role_guest, role_user, role_manager, role_admin;
+grant execute on function validate_exists_by_id(text, uuid)         to role_guest, role_user, role_manager, role_admin;
+grant execute on function set_entity_lifecycle(text, uuid, boolean) to role_user, role_manager, role_admin;
+
+
+-- ============================================================
+-- GRANT EXECUTE на CRUD-функции
+-- ============================================================
+
+-- -------------------------------
+-- app_roles
+-- admin: R C U D
+-- -------------------------------
+grant execute on function get_app_roles()                        to role_admin;
+grant execute on function get_app_role_by_uuid(uuid)             to role_admin;
+grant execute on function create_app_role(varchar)               to role_admin;
+grant execute on function update_app_role_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_app_role_by_uuid(uuid)          to role_admin;
+grant execute on function restore_app_role_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- app_user_profiles
+-- user:    R C U own
+-- manager: R C U own
+-- admin:   R C U D
+-- [note] own реализуется через RLS — см. ниже
+-- -------------------------------
+grant execute on function get_app_user_profiles()                              to role_user, role_manager, role_admin;
+grant execute on function get_app_user_profile_by_uuid(uuid)                   to role_user, role_manager, role_admin;
+grant execute on function create_app_user_profile(varchar, uuid)               to role_user, role_manager, role_admin;
+grant execute on function update_app_user_profile_by_uuid(uuid, varchar, uuid) to role_user, role_manager, role_admin;
+grant execute on function delete_app_user_profile_by_uuid(uuid)                to role_admin;
+grant execute on function restore_app_user_profile_by_uuid(uuid)               to role_admin;
+
+-- -------------------------------
+-- app_users
+-- user:    R C U own
+-- manager: R C U own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_app_users()                                       to role_user, role_manager, role_admin;
+grant execute on function get_app_user_by_uuid(uuid)                            to role_user, role_manager, role_admin;
+grant execute on function create_app_user(varchar, varchar, uuid)               to role_user, role_manager, role_admin;
+grant execute on function update_app_user_by_uuid(uuid, varchar, varchar, uuid) to role_user, role_manager, role_admin;
+grant execute on function delete_app_user_by_uuid(uuid)                         to role_admin;
+grant execute on function restore_app_user_by_uuid(uuid)                        to role_admin;
+
+-- -------------------------------
+-- brands
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_brands()                        to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_brand_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_brand(varchar)               to role_admin;
+grant execute on function update_brand_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_brand_by_uuid(uuid)          to role_admin;
+grant execute on function restore_brand_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- drive_types
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_drive_types()                        to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_drive_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_drive_type(varchar)               to role_admin;
+grant execute on function update_drive_type_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_drive_type_by_uuid(uuid)          to role_admin;
+grant execute on function restore_drive_type_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- transmission_types
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_transmission_types()                        to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_transmission_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_transmission_type(varchar)               to role_admin;
+grant execute on function update_transmission_type_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_transmission_type_by_uuid(uuid)          to role_admin;
+grant execute on function restore_transmission_type_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- usage_types
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_usage_types()                        to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_usage_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_usage_type(varchar)               to role_admin;
+grant execute on function update_usage_type_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_usage_type_by_uuid(uuid)          to role_admin;
+grant execute on function restore_usage_type_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- capacity_types
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_capacity_types()                        to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_capacity_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_capacity_type(varchar)               to role_admin;
+grant execute on function update_capacity_type_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_capacity_type_by_uuid(uuid)          to role_admin;
+grant execute on function restore_capacity_type_by_uuid(uuid)         to role_admin;
+
+-- -------------------------------
+-- capacities
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_capacities()                         to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_capacity_by_uuid(uuid)               to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_capacity(int, uuid)               to role_admin;
+grant execute on function update_capacity_by_uuid(uuid, int, uuid) to role_admin;
+grant execute on function delete_capacity_by_uuid(uuid)            to role_admin;
+grant execute on function restore_capacity_by_uuid(uuid)           to role_admin;
+
+-- -------------------------------
+-- cars
+-- guest: R  |  user: R  |  manager: R  |  admin: R C U D
+-- -------------------------------
+grant execute on function get_cars()                                                                                    to role_guest, role_user, role_manager, role_admin;
+grant execute on function get_car_by_uuid(uuid)                                                                         to role_guest, role_user, role_manager, role_admin;
+grant execute on function create_car(varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid)               to role_admin;
+grant execute on function update_car_by_uuid(uuid, varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid) to role_admin;
+grant execute on function delete_car_by_uuid(uuid)                                                                      to role_admin;
+grant execute on function restore_car_by_uuid(uuid)                                                                     to role_admin;
+
+-- -------------------------------
+-- app_user_profile_cars
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_app_user_profile_cars()                to role_user, role_manager, role_admin;
+grant execute on function get_app_user_profile_car_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_app_user_profile_car(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_app_user_profile_car_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_app_user_profile_car_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- profile_filter_brands
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_profile_filter_brands()                to role_user, role_manager, role_admin;
+grant execute on function get_profile_filter_brand_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_profile_filter_brand(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_profile_filter_brand_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_profile_filter_brand_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- profile_filter_drive_types
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_profile_filter_drive_types()                to role_user, role_manager, role_admin;
+grant execute on function get_profile_filter_drive_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_profile_filter_drive_type(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_profile_filter_drive_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_profile_filter_drive_type_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- profile_filter_transmission_types
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_profile_filter_transmission_types()                to role_user, role_manager, role_admin;
+grant execute on function get_profile_filter_transmission_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_profile_filter_transmission_type(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_profile_filter_transmission_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_profile_filter_transmission_type_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- profile_filter_usage_types
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_profile_filter_usage_types()                to role_user, role_manager, role_admin;
+grant execute on function get_profile_filter_usage_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_profile_filter_usage_type(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_profile_filter_usage_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_profile_filter_usage_type_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- profile_filter_capacities
+-- user:    R C D own
+-- manager: R C D own
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_profile_filter_capacities()               to role_user, role_manager, role_admin;
+grant execute on function get_profile_filter_capacity_by_uuid(uuid)     to role_user, role_manager, role_admin;
+grant execute on function create_profile_filter_capacity(uuid, uuid)    to role_user, role_manager, role_admin;
+grant execute on function delete_profile_filter_capacity_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function restore_profile_filter_capacity_by_uuid(uuid) to role_user, role_manager, role_admin;
+
+-- -------------------------------
+-- app_requests
+-- user:    R C own
+-- manager: R all C U D
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_app_requests()                                 to role_user, role_manager, role_admin;
+grant execute on function get_app_request_by_uuid(uuid)                      to role_user, role_manager, role_admin;
+grant execute on function create_app_request(uuid, uuid, text)               to role_user, role_manager, role_admin;
+grant execute on function update_app_request_by_uuid(uuid, uuid, uuid, text) to role_manager, role_admin;
+grant execute on function delete_app_request_by_uuid(uuid)                   to role_manager, role_admin;
+grant execute on function restore_app_request_by_uuid(uuid)                  to role_manager, role_admin;
+
+-- -------------------------------
+-- app_orders
+-- user:    R own
+-- manager: R all C U
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_app_orders()                                                                    to role_user, role_manager, role_admin;
+grant execute on function get_app_order_by_uuid(uuid)                                                         to role_user, role_manager, role_admin;
+grant execute on function create_app_order(date, int, numeric, numeric, uuid, uuid, uuid, text)               to role_manager, role_admin;
+grant execute on function update_app_order_by_uuid(uuid, date, int, numeric, numeric, uuid, uuid, uuid, text) to role_manager, role_admin;
+grant execute on function delete_app_order_by_uuid(uuid)                                                      to role_admin;
+grant execute on function restore_app_order_by_uuid(uuid)                                                     to role_admin;
+
+
+-- -------------------------------
+-- app_statuses
+-- manager: R
+-- admin:   R C U D
+-- -------------------------------
+grant execute on function get_app_statuses()                       to role_manager, role_admin;
+grant execute on function get_app_status_by_uuid(uuid)             to role_manager, role_admin;
+grant execute on function create_app_status(varchar)               to role_admin;
+grant execute on function update_app_status_by_uuid(uuid, varchar) to role_admin;
+grant execute on function delete_app_status_by_uuid(uuid)          to role_admin;
+grant execute on function restore_app_status_by_uuid(uuid)         to role_admin;
+
+
+-- -------------------------------
+-- app_request_status_histories
+-- user:    R own
+-- manager: R all C
+-- admin:   R C
+-- [note] append-only — delete/restore нет ни у кого
+-- -------------------------------
+grant execute on function get_app_request_status_histories()            to role_user, role_manager, role_admin;
+grant execute on function get_app_request_status_history_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function create_app_request_status_history(uuid, uuid) to role_manager, role_admin;
+
+
+-- -------------------------------
+-- app_order_status_histories
+-- user:    R own
+-- manager: R all C
+-- admin:   R C
+-- [note] append-only — delete/restore нет ни у кого
+-- -------------------------------
+grant execute on function get_app_order_status_histories()            to role_user, role_manager, role_admin;
+grant execute on function get_app_order_status_history_by_uuid(uuid)  to role_user, role_manager, role_admin;
+grant execute on function create_app_order_status_history(uuid, uuid) to role_manager, role_admin;
+
+
+
+-- ============================================================
+-- TABLE-LEVEL GRANT
+-- ============================================================
+
+
+-- -------------------------------
+-- SELECT — все таблицы
+-- нужен для get*, is_record_active, validate_exists_by_id
+-- -------------------------------
+grant select on
+    app_roles,
+    app_user_profiles,
+    app_users,
+    brands,
+    drive_types,
+    transmission_types,
+    usage_types,
+    capacity_types,
+    capacities,
+    cars,
+    app_user_profile_cars,
+    profile_filter_brands,
+    profile_filter_drive_types,
+    profile_filter_transmission_types,
+    profile_filter_usage_types,
+    profile_filter_capacities,
+    app_requests,
+    app_orders,
+    app_statuses,
+    app_request_status_histories,
+    app_order_status_histories
+to role_guest, role_user, role_manager, role_admin;
+
+
+-- -------------------------------
+-- INSERT — все таблицы
+-- нужен для create_*
+-- -------------------------------
+grant insert on
+    app_roles,
+    app_user_profiles,
+    app_users,
+    brands,
+    drive_types,
+    transmission_types,
+    usage_types,
+    capacity_types,
+    capacities,
+    cars,
+    app_user_profile_cars,
+    profile_filter_brands,
+    profile_filter_drive_types,
+    profile_filter_transmission_types,
+    profile_filter_usage_types,
+    profile_filter_capacities,
+    app_requests,
+    app_orders,
+    app_statuses,
+    app_request_status_histories,
+    app_order_status_histories
+to role_user, role_manager, role_admin;
+
+
+-- -------------------------------
+-- UPDATE — не-history таблицы
+-- нужен для update_*, delete_* soft, restore_*
+-- history — только append, update не нужен
+-- -------------------------------
+grant update on
+    app_roles,
+    app_user_profiles,
+    app_users,
+    brands,
+    drive_types,
+    transmission_types,
+    usage_types,
+    capacity_types,
+    capacities,
+    cars,
+    app_user_profile_cars,
+    profile_filter_brands,
+    profile_filter_drive_types,
+    profile_filter_transmission_types,
+    profile_filter_usage_types,
+    profile_filter_capacities,
+    app_requests,
+    app_orders,
+    app_statuses
+to role_user, role_manager, role_admin;
