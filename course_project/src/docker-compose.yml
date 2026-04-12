@@ -1,0 +1,29 @@
+version: "3.9"
+name: coursework
+
+services:
+    postgres-master:
+        image: "${DB_IMAGE}:${DB_VERSION}"
+        container_name: "${DB_IMAGE}-${DB_VERSION}-master"
+        environment:
+            POSTGRES_DB: ${DB_NAME}
+            POSTGRES_USER: ${DB_ADMIN}
+            POSTGRES_PASSWORD: ${DB_ADMIN_PASS}
+        ports:
+            - "${DB_PORT_FROM_MASTER}:${DB_PORT_TO_MASTER}"
+        volumes:
+            - ${DB_VOLUME_MASTER}
+    postgres-slave:
+        image: "${DB_IMAGE}:${DB_VERSION}"
+        container_name: "${DB_IMAGE}-${DB_VERSION}-slave"
+        environment:
+            POSTGRES_DB: ${DB_NAME}
+            POSTGRES_USER: ${DB_ADMIN}
+            POSTGRES_PASSWORD: ${DB_ADMIN_PASS}
+        ports:
+            - "${DB_PORT_FROM_SLAVE}:${DB_PORT_TO_SLAVE}"
+        volumes:
+            - ${DB_VOLUME_SLAVE}
+
+volumes:
+    EDU:
