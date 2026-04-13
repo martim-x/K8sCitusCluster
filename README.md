@@ -11,7 +11,7 @@
 
 ## Архитектура
 
-![DB Schema](db_shema/db_schema.svg)
+![DB Schema](k8s-cluster/db_shema/db_schema.svg)
 
 ## Структура Helm чарта
 
