@@ -1,4 +1,4 @@
-# Citus PostgreSQL Cluster
+# K8s Postgres Citus Helm Cluster
 
 ## Стек
 
@@ -9,7 +9,7 @@
 | worker-x-y    | citusdata/citus:13.0 | Хранит шарды                               |
 | pg-locker     | postgres:18.3        | Глобальные блокировки                      |
 
-## Архитектура
+## Multi-master Архитектура
 
 ![DB Schema](k8s-cluster/db_shema/db_schema.svg)
 
