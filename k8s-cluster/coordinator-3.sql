@@ -39,44 +39,74 @@ select create_distributed_table('app_users_distributed', 'id');
 select * from pg_dist_partition;
 select * from pg_dist_shard;
 
+SELECT
+    s.logicalrelid::regclass AS table_name,
+    s.shardid,
+    p.shardstate,
+    n.nodename,
+    n.nodeport
+FROM pg_dist_shard       AS s
+JOIN pg_dist_placement   AS p ON s.shardid = p.shardid
+JOIN pg_dist_node        AS n ON p.groupid = n.groupid
+WHERE s.logicalrelid = 'app_users_distributed'::regclass
+  AND n.noderole = 'primary'
+ORDER BY s.shardid, n.nodename, n.nodeport;
 
 -- # ==========================================================
 -- # trigger
 -- # ==========================================================
 create or replace function sync_incoming_to_distributed()
-returns trigger language plpgsql as $$
+returns trigger
+language plpgsql
+as $$
 begin
     if tg_op = 'INSERT' then
-        insert into app_users_distributed (id, name, balance)
+        insert into public.app_users_distributed (id, name, balance)
         values (new.id, new.name, new.balance)
         on conflict (id) do update
-            set name    = excluded.name,
-                balance = excluded.balance;
+        set name = excluded.name,
+            balance = excluded.balance;
+        return new;
 
     elsif tg_op = 'UPDATE' then
-        update app_users_distributed
-        set name    = new.name,
+        update public.app_users_distributed
+        set name = new.name,
             balance = new.balance
         where id = old.id;
+        return new;
 
     elsif tg_op = 'DELETE' then
-        delete from app_users_distributed
+        delete from public.app_users_distributed
         where id = old.id;
+        return old;
     end if;
 
     return null;
 end;
 $$;
 
+drop trigger if exists trg_sync_incoming on app_users;
+
 create trigger trg_sync_incoming
-after insert or update or delete on app_users
+before insert or update or delete on app_users
 for each row execute function sync_incoming_to_distributed();
+
+begin;
+set local citus.enable_ddl_propagation to off;
+alter table app_users enable always trigger trg_sync_incoming;
+commit;
 
 
 -- # ==========================================================
 -- # replication
 -- # ==========================================================
-drop subscription if exists coord3_sub_from_master3;
+alter subscription coord3_sub_from_master3 disable;
+
+alter subscription coord3_sub_from_master3
+set (slot_name = none);
+
+drop subscription coord3_sub_from_master3;
+
 
 do $$
 begin
@@ -89,10 +119,12 @@ $$;
 create subscription coord3_sub_from_master3
 connection 'host=master-3.citus.svc.cluster.local port=5432 dbname=postgres user=repl_user password=111'
 publication master3_pub_app
-with (copy_data = true);
+with (origin=any, copy_data = false);
 
 select * from pg_stat_subscription;
 select * from pg_subscription_rel;
 
-select count(*) from app_users_distributed;
 select count(*) from app_users;
+select count(*) from app_users_distributed;
+
+

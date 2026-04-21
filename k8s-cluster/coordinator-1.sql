@@ -33,7 +33,7 @@ select * from master_add_node('worker-1-2.worker-1-headless.citus.svc.cluster.lo
 select * from master_get_active_worker_nodes();
 
 set citus.shard_count = 32;
-set citus.shard_replication_factor = 1;
+set citus.shard_replication_factor = 2;
 
 select create_distributed_table('app_users_distributed', 'id');
 select * from pg_dist_partition;
@@ -43,20 +43,22 @@ select * from pg_dist_shard;
 -- # ==========================================================
 -- # trigger
 -- # ==========================================================
-create or replace function sync_to_distributed()
-returns trigger language plpgsql as $$
+create or replace function sync_incoming_to_distributed()
+returns trigger
+language plpgsql
+as $$
 begin
     if tg_op = 'INSERT' then
         insert into public.app_users_distributed (id, name, balance)
         values (new.id, new.name, new.balance)
         on conflict (id) do update
-            set name    = excluded.name,
-                balance = excluded.balance;
+        set name = excluded.name,
+            balance = excluded.balance;
         return new;
 
     elsif tg_op = 'UPDATE' then
         update public.app_users_distributed
-        set name    = new.name,
+        set name = new.name,
             balance = new.balance
         where id = old.id;
         return new;
@@ -66,24 +68,33 @@ begin
         where id = old.id;
         return old;
     end if;
+
+    return null;
 end;
 $$;
 
+drop trigger if exists trg_sync_incoming on app_users;
 
-create trigger trg_sync
+create trigger trg_sync_incoming
 before insert or update or delete on app_users
-for each row execute function sync_to_distributed();
+for each row execute function sync_incoming_to_distributed();
 
 begin;
 set local citus.enable_ddl_propagation to off;
-alter table app_users enable replica trigger trg_sync;
+alter table app_users enable always trigger trg_sync_incoming;
 commit;
+
 
 
 -- # ==========================================================
 -- # replication
 -- # ==========================================================
-drop subscription if exists coord1_sub_from_master1;
+alter subscription coord1_sub_from_master1 disable;
+
+alter subscription coord1_sub_from_master1
+set (slot_name = none);
+
+drop subscription coord1_sub_from_master1;
 
 do $$
 begin
@@ -96,11 +107,12 @@ $$;
 create subscription coord1_sub_from_master1
 connection 'host=master-1.citus.svc.cluster.local port=5432 dbname=postgres user=repl_user password=111'
 publication master1_pub_app
-with (copy_data = false);
+with (origin=any, copy_data = false);
 
 select * from pg_stat_subscription;
 select * from pg_subscription_rel;
 
 select count(*) from app_users;
 select count(*) from app_users_distributed;
+
 

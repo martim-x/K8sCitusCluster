@@ -2,7 +2,6 @@
 -- # preparation
 -- # ==========================================================
 create extension if not exists dblink;
-create extension if not exists citus;
 show wal_level;
 
 drop table if exists app_users;
@@ -18,6 +17,7 @@ create table app_users(
 drop publication if exists master3_pub_app;
 drop subscription if exists master3_sub_from_master1;
 drop subscription if exists master3_sub_from_master2;
+select pg_drop_replication_slot('coord3_sub_from_master3');
 
 create role repl_user with login replication password '111';
 
@@ -92,3 +92,7 @@ begin
     );
 end;
 $func$;
+
+
+
+
