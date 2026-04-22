@@ -44,21 +44,21 @@ coordinators:
       serviceName: coordinator-1
       storageClassName: coordinator-1-storage
       storageSize: 10Gi
-      mountPath: /var/lib/postgresql/18/docker
+      mountPath: /var/lib/postgresql
       replicas: 1
 
     - name: coordinator-2
       serviceName: coordinator-2
       storageClassName: coordinator-2-storage
       storageSize: 10Gi
-      mountPath: /var/lib/postgresql/18/docker
+      mountPath: /var/lib/postgresql
       replicas: 1
 
     - name: coordinator-3
       serviceName: coordinator-3
       storageClassName: coordinator-3-storage
       storageSize: 10Gi
-      mountPath: /var/lib/postgresql/18/docker
+      mountPath: /var/lib/postgresql
       replicas: 1
 
 workers:
