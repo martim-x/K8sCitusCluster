@@ -54,6 +54,8 @@ create schema if not exists audit;
 -- ============================================================
 
 
+-- [fix] убрали exception-блок — ошибки пробрасываются наверх как текст,
+--       а не проглатываются с возвратом null
 create or replace function util.sanitize_text(
     p_value      text,
     p_field_name text default 'field'
@@ -67,7 +69,8 @@ begin
     v_clean := trim(p_value);
 
     if v_clean is null or v_clean = '' then
-        raise exception 'sanitize_text: % must not be empty', p_field_name;
+        raise exception 'sanitize_text: % must not be empty', p_field_name
+            using errcode = 'check_violation';
     end if;
 
     return v_clean;
@@ -124,13 +127,11 @@ begin
     end if;
 
     return coalesce(v_exists, false);
-exception
-    when others then
-        return false;
 end;
 $$;
 
 
+-- [fix] убрали exception-блок — ошибка пробрасывается наверх с понятным текстом
 create or replace function util.validate_exists_by_id(
     p_table_name text,
     p_id         uuid
@@ -142,7 +143,8 @@ begin
     if not util.is_record_active(p_table_name, p_id) then
         raise exception
             'validate_exists_by_id: record not found or deleted in %.id = %',
-            p_table_name, p_id;
+            p_table_name, p_id
+            using errcode = 'foreign_key_violation';
     end if;
 end;
 $$;
@@ -179,10 +181,15 @@ begin
     into v_id
     using p_is_deleted, p_id;
 
+    -- [fix] если запись не найдена — явная ошибка вместо тихого null
+    if v_id is null then
+        raise exception
+            'set_entity_lifecycle: record not found in %.id = %',
+            p_table_name, p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
-exception
-    when others then
-        return null;
 end;
 $$;
 
@@ -204,6 +211,8 @@ create index idx_app_role_id_hash
 -- -------------------------------
 -- create 1
 -- -------------------------------
+-- [fix] вместо `exception when others then return null` — пробрасываем ошибку
+--       с понятным контекстом через RAISE ... USING DETAIL
 create or replace function app.create_app_role(
     p_name varchar(100)
 )
@@ -232,7 +241,9 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_app_role: %', sqlerrm
+            using detail  = format('name = %L', p_name),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -250,7 +261,8 @@ begin
     where is_deleted = false;
 exception
     when others then
-        return;
+        raise exception 'get_app_roles: %', sqlerrm
+            using errcode = sqlstate;
 end;
 $$;
 
@@ -271,10 +283,17 @@ begin
     from app.roles
     where id = p_id and is_deleted = false;
 
+    if not found then
+        raise exception 'get_app_role_by_uuid: role not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_row;
 exception
     when others then
-        return null;
+        raise exception 'get_app_role_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -300,10 +319,17 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_app_role_by_uuid: role not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'update_app_role_by_uuid: %', sqlerrm
+            using detail  = format('id = %L, name = %L', p_id, p_name),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -321,7 +347,9 @@ begin
     return util.set_entity_lifecycle('app.roles', p_id, true);
 exception
     when others then
-        return null;
+        raise exception 'delete_app_role_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -339,7 +367,9 @@ begin
     return util.set_entity_lifecycle('app.roles', p_id, false);
 exception
     when others then
-        return null;
+        raise exception 'restore_app_role_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -394,9 +424,6 @@ begin
         return v_id;
     end if;
 
-    -- [fix] values (p_name, select id from ...) — невалидный синтаксис.
-    --       FK-ограничение на таблице гарантирует целостность,
-    --       validate_exists_by_id уже проверил существование выше.
     insert into profile.user_profiles (name, app_role_id)
     values (p_name, p_app_role_id)
     returning id into v_id;
@@ -404,7 +431,9 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_app_user_profile: %', sqlerrm
+            using detail  = format('name = %L, app_role_id = %L', p_name, p_app_role_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -422,7 +451,8 @@ begin
     where is_deleted = false;
 exception
     when others then
-        return;
+        raise exception 'get_app_user_profiles: %', sqlerrm
+            using errcode = sqlstate;
 end;
 $$;
 
@@ -443,10 +473,17 @@ begin
     from profile.user_profiles
     where id = p_id and is_deleted = false;
 
+    if not found then
+        raise exception 'get_app_user_profile_by_uuid: profile not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_row;
 exception
     when others then
-        return null;
+        raise exception 'get_app_user_profile_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -477,10 +514,17 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_app_user_profile_by_uuid: profile not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'update_app_user_profile_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -498,7 +542,9 @@ begin
     return util.set_entity_lifecycle('profile.user_profiles', p_id, true);
 exception
     when others then
-        return null;
+        raise exception 'delete_app_user_profile_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -516,7 +562,9 @@ begin
     return util.set_entity_lifecycle('profile.user_profiles', p_id, false);
 exception
     when others then
-        return null;
+        raise exception 'restore_app_user_profile_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -582,7 +630,9 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_app_user: %', sqlerrm
+            using detail  = format('email = %L', p_email),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -600,7 +650,8 @@ begin
     where is_deleted = false;
 exception
     when others then
-        return;
+        raise exception 'get_app_users: %', sqlerrm
+            using errcode = sqlstate;
 end;
 $$;
 
@@ -621,10 +672,17 @@ begin
     from app.users
     where id = p_id and is_deleted = false;
 
+    if not found then
+        raise exception 'get_app_user_by_uuid: user not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_row;
 exception
     when others then
-        return null;
+        raise exception 'get_app_user_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -657,10 +715,17 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_app_user_by_uuid: user not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'update_app_user_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -678,7 +743,9 @@ begin
     return util.set_entity_lifecycle('app.users', p_id, true);
 exception
     when others then
-        return null;
+        raise exception 'delete_app_user_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -696,7 +763,9 @@ begin
     return util.set_entity_lifecycle('app.users', p_id, false);
 exception
     when others then
-        return null;
+        raise exception 'restore_app_user_by_uuid: %', sqlerrm
+            using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -714,85 +783,77 @@ create table content.brands (
 create index idx_brand_id_hash
     on content.brands using hash (id);
 
-
--- -------------------------------
--- create 1
--- -------------------------------
 create or replace function content.create_brand(p_name varchar(100))
 returns uuid language plpgsql as $$
-declare
-    v_id uuid;
+declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
-
-    select id into v_id from content.brands
-    where name = p_name and is_deleted = true;
-
-    if found then
-        return util.set_entity_lifecycle('content.brands', v_id, false);
-    end if;
-
+    select id into v_id from content.brands where name = p_name and is_deleted = true;
+    if found then return util.set_entity_lifecycle('content.brands', v_id, false); end if;
     insert into content.brands (name) values (p_name) returning id into v_id;
     return v_id;
 exception
-    when others then return null;
+    when others then
+        raise exception 'create_brand: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get many
--- -------------------------------
 create or replace function content.get_brands()
 returns setof content.brands language plpgsql as $$
 begin
     return query select * from content.brands where is_deleted = false;
 exception
-    when others then return;
+    when others then
+        raise exception 'get_brands: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get 1
--- -------------------------------
 create or replace function content.get_brand_by_uuid(p_id uuid)
 returns content.brands language plpgsql as $$
-declare
-    v_row content.brands;
+declare v_row content.brands;
 begin
     select * into v_row from content.brands where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_brand_by_uuid: brand not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
 exception
-    when others then return null;
+    when others then
+        raise exception 'get_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- update 1
--- -------------------------------
 create or replace function content.update_brand_by_uuid(p_id uuid, p_name varchar(100))
 returns uuid language plpgsql as $$
-declare
-    v_id uuid;
+declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.brands set name = p_name
     where id = p_id and is_deleted = false
     returning id into v_id;
+    if v_id is null then
+        raise exception 'update_brand_by_uuid: brand not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
 exception
-    when others then return null;
+    when others then
+        raise exception 'update_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- delete 1 (soft) / restore 1
--- -------------------------------
 create or replace function content.delete_brand_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
 begin
     return util.set_entity_lifecycle('content.brands', p_id, true);
 exception
-    when others then return null;
+    when others then
+        raise exception 'delete_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -801,7 +862,9 @@ returns uuid language plpgsql as $$
 begin
     return util.set_entity_lifecycle('content.brands', p_id, false);
 exception
-    when others then return null;
+    when others then
+        raise exception 'restore_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -828,7 +891,10 @@ begin
     if found then return util.set_entity_lifecycle('content.drive_types', v_id, false); end if;
     insert into content.drive_types (name) values (p_name) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_drive_type: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
@@ -836,7 +902,9 @@ create or replace function content.get_drive_types()
 returns setof content.drive_types language plpgsql as $$
 begin
     return query select * from content.drive_types where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_drive_types: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
@@ -845,8 +913,15 @@ returns content.drive_types language plpgsql as $$
 declare v_row content.drive_types;
 begin
     select * into v_row from content.drive_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_drive_type_by_uuid: drive type not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -856,21 +931,38 @@ declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.drive_types set name = p_name where id = p_id and is_deleted = false returning id into v_id;
+    if v_id is null then
+        raise exception 'update_drive_type_by_uuid: drive type not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
 create or replace function content.delete_drive_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.drive_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.drive_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_drive_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.drive_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.drive_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -896,7 +988,10 @@ begin
     if found then return util.set_entity_lifecycle('content.transmission_types', v_id, false); end if;
     insert into content.transmission_types (name) values (p_name) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_transmission_type: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
@@ -904,7 +999,9 @@ create or replace function content.get_transmission_types()
 returns setof content.transmission_types language plpgsql as $$
 begin
     return query select * from content.transmission_types where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_transmission_types: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
@@ -913,8 +1010,15 @@ returns content.transmission_types language plpgsql as $$
 declare v_row content.transmission_types;
 begin
     select * into v_row from content.transmission_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_transmission_type_by_uuid: transmission type not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -924,21 +1028,38 @@ declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.transmission_types set name = p_name where id = p_id and is_deleted = false returning id into v_id;
+    if v_id is null then
+        raise exception 'update_transmission_type_by_uuid: transmission type not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
 create or replace function content.delete_transmission_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.transmission_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.transmission_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_transmission_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.transmission_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.transmission_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -964,7 +1085,10 @@ begin
     if found then return util.set_entity_lifecycle('content.usage_types', v_id, false); end if;
     insert into content.usage_types (name) values (p_name) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_usage_type: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
@@ -972,7 +1096,9 @@ create or replace function content.get_usage_types()
 returns setof content.usage_types language plpgsql as $$
 begin
     return query select * from content.usage_types where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_usage_types: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
@@ -981,8 +1107,15 @@ returns content.usage_types language plpgsql as $$
 declare v_row content.usage_types;
 begin
     select * into v_row from content.usage_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_usage_type_by_uuid: usage type not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -992,21 +1125,38 @@ declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.usage_types set name = p_name where id = p_id and is_deleted = false returning id into v_id;
+    if v_id is null then
+        raise exception 'update_usage_type_by_uuid: usage type not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
 create or replace function content.delete_usage_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.usage_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.usage_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_usage_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.usage_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.usage_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1032,7 +1182,10 @@ begin
     if found then return util.set_entity_lifecycle('content.capacity_types', v_id, false); end if;
     insert into content.capacity_types (name) values (p_name) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_capacity_type: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
@@ -1040,7 +1193,9 @@ create or replace function content.get_capacity_types()
 returns setof content.capacity_types language plpgsql as $$
 begin
     return query select * from content.capacity_types where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_capacity_types: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
@@ -1049,8 +1204,15 @@ returns content.capacity_types language plpgsql as $$
 declare v_row content.capacity_types;
 begin
     select * into v_row from content.capacity_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_capacity_type_by_uuid: capacity type not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_capacity_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
@@ -1060,21 +1222,38 @@ declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.capacity_types set name = p_name where id = p_id and is_deleted = false returning id into v_id;
+    if v_id is null then
+        raise exception 'update_capacity_type_by_uuid: capacity type not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_capacity_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
 create or replace function content.delete_capacity_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.capacity_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.capacity_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_capacity_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_capacity_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.capacity_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.capacity_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_capacity_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1093,10 +1272,6 @@ create table content.capacities (
 create index idx_capacity_id_hash
     on content.capacities using hash (id);
 
-
--- -------------------------------
--- create 1
--- -------------------------------
 create or replace function content.create_capacity(
     p_value            int,
     p_capacity_type_id uuid
@@ -1128,37 +1303,39 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_capacity: %', sqlerrm
+            using detail  = format('value = %L, capacity_type_id = %L', p_value, p_capacity_type_id),
+                  errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get many
--- -------------------------------
 create or replace function content.get_capacities()
 returns setof content.capacities language plpgsql as $$
 begin
     return query select * from content.capacities where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_capacities: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get 1
--- -------------------------------
 create or replace function content.get_capacity_by_uuid(p_id uuid)
 returns content.capacities language plpgsql as $$
 declare v_row content.capacities;
 begin
     select * into v_row from content.capacities where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_capacity_by_uuid: capacity not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- update 1
--- -------------------------------
 create or replace function content.update_capacity_by_uuid(
     p_id               uuid,
     p_value            int,
@@ -1173,24 +1350,38 @@ begin
         capacity_type_id = p_capacity_type_id
     where id = p_id and is_deleted = false
     returning id into v_id;
+    if v_id is null then
+        raise exception 'update_capacity_by_uuid: capacity not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- delete 1 (soft) / restore 1
--- -------------------------------
 create or replace function content.delete_capacity_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.capacities', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.capacities', p_id, true);
+exception
+    when others then
+        raise exception 'delete_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_capacity_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.capacities', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.capacities', p_id, false);
+exception
+    when others then
+        raise exception 'restore_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1217,10 +1408,6 @@ create table content.cars (
 create index idx_car_id_hash
     on content.cars using hash (id);
 
-
--- -------------------------------
--- create 1
--- -------------------------------
 create or replace function content.create_car(
     p_name                 varchar(100),
     p_price_of_origin      numeric(12, 2),
@@ -1240,16 +1427,16 @@ declare
     v_id uuid;
 begin
     -- [sanitize]
-    p_name             := util.sanitize_text(p_name,             'name');
+    p_name              := util.sanitize_text(p_name,              'name');
     p_country_of_origin := util.sanitize_text(p_country_of_origin, 'country_of_origin');
-    p_description      := util.sanitize_text(p_description,      'description');
+    p_description       := util.sanitize_text(p_description,       'description');
 
     -- [validate fk]
     perform util.validate_exists_by_id('content.brands',             p_brand_id);
     perform util.validate_exists_by_id('content.drive_types',        p_drive_type_id);
     perform util.validate_exists_by_id('content.transmission_types', p_transmission_type_id);
     perform util.validate_exists_by_id('content.usage_types',        p_usage_type_id);
-    perform util.validate_exists_by_id('content.capacities',          p_capacity_id);
+    perform util.validate_exists_by_id('content.capacities',         p_capacity_id);
 
     insert into content.cars (
         name, price_of_origin, manufacture_date, country_of_origin, description,
@@ -1264,37 +1451,39 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_car: %', sqlerrm
+            using detail  = format('name = %L', p_name),
+                  errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get many
--- -------------------------------
 create or replace function content.get_cars()
 returns setof content.cars language plpgsql as $$
 begin
     return query select * from content.cars where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_cars: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get 1
--- -------------------------------
 create or replace function content.get_car_by_uuid(p_id uuid)
 returns content.cars language plpgsql as $$
 declare v_row content.cars;
 begin
     select * into v_row from content.cars where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_car_by_uuid: car not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- update 1
--- -------------------------------
 create or replace function content.update_car_by_uuid(
     p_id                   uuid,
     p_name                 varchar(100),
@@ -1319,7 +1508,7 @@ begin
     perform util.validate_exists_by_id('content.drive_types',        p_drive_type_id);
     perform util.validate_exists_by_id('content.transmission_types', p_transmission_type_id);
     perform util.validate_exists_by_id('content.usage_types',        p_usage_type_id);
-    perform util.validate_exists_by_id('content.capacities',          p_capacity_id);
+    perform util.validate_exists_by_id('content.capacities',         p_capacity_id);
 
     update content.cars set
         name                 = p_name,
@@ -1335,24 +1524,39 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_car_by_uuid: car not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'update_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- delete 1 (soft) / restore 1
--- -------------------------------
 create or replace function content.delete_car_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.cars', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.cars', p_id, true);
+exception
+    when others then
+        raise exception 'delete_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_car_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.cars', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.cars', p_id, false);
+exception
+    when others then
+        raise exception 'restore_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1362,7 +1566,7 @@ $$;
 create table junction.user_profile_cars (
     id                  uuid    primary key default uuidv7(),
 
-    is_deleted          boolean not null default false,  -- [fix] добавлен is_deleted
+    is_deleted          boolean not null default false,
 
     app_user_profile_id uuid    not null references profile.user_profiles(id),
     car_id              uuid    not null references content.cars(id)
@@ -1379,7 +1583,7 @@ returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
     perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.cars',              p_car_id);
+    perform util.validate_exists_by_id('content.cars',          p_car_id);
 
     select id into v_id from junction.user_profile_cars
     where app_user_profile_id = p_app_user_profile_id
@@ -1393,7 +1597,11 @@ begin
     returning id into v_id;
 
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_app_user_profile_car: %', sqlerrm
+            using detail  = format('profile_id = %L, car_id = %L', p_app_user_profile_id, p_car_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -1401,7 +1609,9 @@ create or replace function junction.get_app_user_profile_cars()
 returns setof junction.user_profile_cars language plpgsql as $$
 begin
     return query select * from junction.user_profile_cars where is_deleted = false;
-exception when others then return;
+exception
+    when others then
+        raise exception 'get_app_user_profile_cars: %', sqlerrm using errcode = sqlstate;
 end;
 $$;
 
@@ -1410,21 +1620,38 @@ returns junction.user_profile_cars language plpgsql as $$
 declare v_row junction.user_profile_cars;
 begin
     select * into v_row from junction.user_profile_cars where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_user_profile_car_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'get_app_user_profile_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.delete_app_user_profile_car_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.user_profile_cars', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.user_profile_cars', p_id, true);
+exception
+    when others then
+        raise exception 'delete_app_user_profile_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_app_user_profile_car_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.user_profile_cars', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.user_profile_cars', p_id, false);
+exception
+    when others then
+        raise exception 'restore_app_user_profile_car_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1448,7 +1675,7 @@ returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
     perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.brands',            p_brand_id);
+    perform util.validate_exists_by_id('content.brands',        p_brand_id);
 
     select id into v_id from junction.profile_filter_brands
     where app_user_profile_id = p_app_user_profile_id and brand_id = p_brand_id and is_deleted = true;
@@ -1458,14 +1685,22 @@ begin
     insert into junction.profile_filter_brands (app_user_profile_id, brand_id)
     values (p_app_user_profile_id, p_brand_id) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_profile_filter_brand: %', sqlerrm
+            using detail  = format('profile_id = %L, brand_id = %L', p_app_user_profile_id, p_brand_id),
+                  errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.get_profile_filter_brands()
 returns setof junction.profile_filter_brands language plpgsql as $$
-begin return query select * from junction.profile_filter_brands where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from junction.profile_filter_brands where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_profile_filter_brands: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.get_profile_filter_brand_by_uuid(p_id uuid)
@@ -1473,20 +1708,38 @@ returns junction.profile_filter_brands language plpgsql as $$
 declare v_row junction.profile_filter_brands;
 begin
     select * into v_row from junction.profile_filter_brands where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_profile_filter_brand_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_profile_filter_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.delete_profile_filter_brand_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, true);
+exception
+    when others then
+        raise exception 'delete_profile_filter_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_profile_filter_brand_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, false);
+exception
+    when others then
+        raise exception 'restore_profile_filter_brand_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1510,7 +1763,7 @@ returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
     perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.drive_types',       p_drive_type_id);
+    perform util.validate_exists_by_id('content.drive_types',   p_drive_type_id);
 
     select id into v_id from junction.profile_filter_drive_types
     where app_user_profile_id = p_app_user_profile_id and drive_type_id = p_drive_type_id and is_deleted = true;
@@ -1520,14 +1773,22 @@ begin
     insert into junction.profile_filter_drive_types (app_user_profile_id, drive_type_id)
     values (p_app_user_profile_id, p_drive_type_id) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_profile_filter_drive_type: %', sqlerrm
+            using detail  = format('profile_id = %L, drive_type_id = %L', p_app_user_profile_id, p_drive_type_id),
+                  errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.get_profile_filter_drive_types()
 returns setof junction.profile_filter_drive_types language plpgsql as $$
-begin return query select * from junction.profile_filter_drive_types where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from junction.profile_filter_drive_types where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_profile_filter_drive_types: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.get_profile_filter_drive_type_by_uuid(p_id uuid)
@@ -1535,20 +1796,38 @@ returns junction.profile_filter_drive_types language plpgsql as $$
 declare v_row junction.profile_filter_drive_types;
 begin
     select * into v_row from junction.profile_filter_drive_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_profile_filter_drive_type_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_profile_filter_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.delete_profile_filter_drive_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_profile_filter_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_profile_filter_drive_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_profile_filter_drive_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1571,7 +1850,7 @@ create or replace function junction.create_profile_filter_transmission_type(p_ap
 returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
-    perform util.validate_exists_by_id('profile.user_profiles',  p_app_user_profile_id);
+    perform util.validate_exists_by_id('profile.user_profiles',      p_app_user_profile_id);
     perform util.validate_exists_by_id('content.transmission_types', p_transmission_type_id);
 
     select id into v_id from junction.profile_filter_transmission_types
@@ -1582,14 +1861,22 @@ begin
     insert into junction.profile_filter_transmission_types (app_user_profile_id, transmission_type_id)
     values (p_app_user_profile_id, p_transmission_type_id) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_profile_filter_transmission_type: %', sqlerrm
+            using detail  = format('profile_id = %L, transmission_type_id = %L', p_app_user_profile_id, p_transmission_type_id),
+                  errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.get_profile_filter_transmission_types()
 returns setof junction.profile_filter_transmission_types language plpgsql as $$
-begin return query select * from junction.profile_filter_transmission_types where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from junction.profile_filter_transmission_types where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_profile_filter_transmission_types: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.get_profile_filter_transmission_type_by_uuid(p_id uuid)
@@ -1597,20 +1884,38 @@ returns junction.profile_filter_transmission_types language plpgsql as $$
 declare v_row junction.profile_filter_transmission_types;
 begin
     select * into v_row from junction.profile_filter_transmission_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_profile_filter_transmission_type_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_profile_filter_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.delete_profile_filter_transmission_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_profile_filter_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_profile_filter_transmission_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_profile_filter_transmission_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1634,7 +1939,7 @@ returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
     perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.usage_types',       p_usage_type_id);
+    perform util.validate_exists_by_id('content.usage_types',   p_usage_type_id);
 
     select id into v_id from junction.profile_filter_usage_types
     where app_user_profile_id = p_app_user_profile_id and usage_type_id = p_usage_type_id and is_deleted = true;
@@ -1644,14 +1949,22 @@ begin
     insert into junction.profile_filter_usage_types (app_user_profile_id, usage_type_id)
     values (p_app_user_profile_id, p_usage_type_id) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_profile_filter_usage_type: %', sqlerrm
+            using detail  = format('profile_id = %L, usage_type_id = %L', p_app_user_profile_id, p_usage_type_id),
+                  errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.get_profile_filter_usage_types()
 returns setof junction.profile_filter_usage_types language plpgsql as $$
-begin return query select * from junction.profile_filter_usage_types where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from junction.profile_filter_usage_types where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_profile_filter_usage_types: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.get_profile_filter_usage_type_by_uuid(p_id uuid)
@@ -1659,20 +1972,38 @@ returns junction.profile_filter_usage_types language plpgsql as $$
 declare v_row junction.profile_filter_usage_types;
 begin
     select * into v_row from junction.profile_filter_usage_types where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_profile_filter_usage_type_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_profile_filter_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.delete_profile_filter_usage_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, true);
+exception
+    when others then
+        raise exception 'delete_profile_filter_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_profile_filter_usage_type_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, false);
+exception
+    when others then
+        raise exception 'restore_profile_filter_usage_type_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1696,7 +2027,7 @@ returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
     perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.capacities',         p_capacity_id);
+    perform util.validate_exists_by_id('content.capacities',    p_capacity_id);
 
     select id into v_id from junction.profile_filter_capacities
     where app_user_profile_id = p_app_user_profile_id and capacity_id = p_capacity_id and is_deleted = true;
@@ -1706,14 +2037,22 @@ begin
     insert into junction.profile_filter_capacities (app_user_profile_id, capacity_id)
     values (p_app_user_profile_id, p_capacity_id) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_profile_filter_capacity: %', sqlerrm
+            using detail  = format('profile_id = %L, capacity_id = %L', p_app_user_profile_id, p_capacity_id),
+                  errcode = sqlstate;
 end;
 $$;
 
 create or replace function junction.get_profile_filter_capacities()
 returns setof junction.profile_filter_capacities language plpgsql as $$
-begin return query select * from junction.profile_filter_capacities where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from junction.profile_filter_capacities where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_profile_filter_capacities: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.get_profile_filter_capacity_by_uuid(p_id uuid)
@@ -1721,20 +2060,38 @@ returns junction.profile_filter_capacities language plpgsql as $$
 declare v_row junction.profile_filter_capacities;
 begin
     select * into v_row from junction.profile_filter_capacities where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_profile_filter_capacity_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_profile_filter_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.delete_profile_filter_capacity_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, true);
+exception
+    when others then
+        raise exception 'delete_profile_filter_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function junction.restore_profile_filter_capacity_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, false);
+exception
+    when others then
+        raise exception 'restore_profile_filter_capacity_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1754,10 +2111,6 @@ create table content.requests (
 create index idx_app_request_id_hash
     on content.requests using hash (id);
 
-
--- -------------------------------
--- create 1
--- -------------------------------
 create or replace function content.create_app_request(
     p_app_user_id uuid,
     p_car_id      uuid,
@@ -1770,8 +2123,8 @@ declare
     v_id uuid;
 begin
     -- [validate fk]
-    perform util.validate_exists_by_id('app.users', p_app_user_id);
-    perform util.validate_exists_by_id('content.cars',      p_car_id);
+    perform util.validate_exists_by_id('app.users',    p_app_user_id);
+    perform util.validate_exists_by_id('content.cars', p_car_id);
 
     -- [sanitize] comment опциональный — sanitize только если передан
     if p_comment is not null then
@@ -1785,34 +2138,39 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_app_request: %', sqlerrm
+            using detail  = format('user_id = %L, car_id = %L', p_app_user_id, p_car_id),
+                  errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get many
--- -------------------------------
 create or replace function content.get_app_requests()
 returns setof content.requests language plpgsql as $$
-begin return query select * from content.requests where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from content.requests where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_app_requests: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- get 1
--- -------------------------------
 create or replace function content.get_app_request_by_uuid(p_id uuid)
 returns content.requests language plpgsql as $$
 declare v_row content.requests;
 begin
     select * into v_row from content.requests where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_request_by_uuid: request not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_app_request_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- update 1
--- -------------------------------
 create or replace function content.update_app_request_by_uuid(
     p_id          uuid,
     p_app_user_id uuid,
@@ -1822,8 +2180,8 @@ create or replace function content.update_app_request_by_uuid(
 returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
-    perform util.validate_exists_by_id('app.users', p_app_user_id);
-    perform util.validate_exists_by_id('content.cars',      p_car_id);
+    perform util.validate_exists_by_id('app.users',    p_app_user_id);
+    perform util.validate_exists_by_id('content.cars', p_car_id);
 
     if p_comment is not null then
         p_comment := util.sanitize_text(p_comment, 'comment');
@@ -1836,23 +2194,39 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_app_request_by_uuid: request not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'update_app_request_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- delete 1 (soft) / restore 1
--- -------------------------------
 create or replace function content.delete_app_request_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.requests', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.requests', p_id, true);
+exception
+    when others then
+        raise exception 'delete_app_request_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_app_request_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.requests', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.requests', p_id, false);
+exception
+    when others then
+        raise exception 'restore_app_request_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -1877,10 +2251,6 @@ create table content.orders (
 create index idx_app_order_id_hash
     on content.orders using hash (id);
 
-
--- -------------------------------
--- create 1
--- -------------------------------
 create or replace function content.create_app_order(
     p_order_date      date,
     p_period_months   int,
@@ -1898,8 +2268,8 @@ declare
     v_id uuid;
 begin
     -- [validate fk]
-    perform util.validate_exists_by_id('app.users',    p_app_user_id);
-    perform util.validate_exists_by_id('app.users',    p_manager_id);
+    perform util.validate_exists_by_id('app.users',        p_app_user_id);
+    perform util.validate_exists_by_id('app.users',        p_manager_id);
     perform util.validate_exists_by_id('content.requests', p_app_request_id);
 
     if p_comment is not null then
@@ -1919,34 +2289,39 @@ begin
     return v_id;
 exception
     when others then
-        return null;
+        raise exception 'create_app_order: %', sqlerrm
+            using detail  = format('user_id = %L, request_id = %L', p_app_user_id, p_app_request_id),
+                  errcode = sqlstate;
 end;
 $$;
 
--- -------------------------------
--- get many
--- -------------------------------
 create or replace function content.get_app_orders()
 returns setof content.orders language plpgsql as $$
-begin return query select * from content.orders where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from content.orders where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_app_orders: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- get 1
--- -------------------------------
 create or replace function content.get_app_order_by_uuid(p_id uuid)
 returns content.orders language plpgsql as $$
 declare v_row content.orders;
 begin
     select * into v_row from content.orders where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_order_by_uuid: order not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_app_order_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- update 1
--- -------------------------------
 create or replace function content.update_app_order_by_uuid(
     p_id              uuid,
     p_order_date      date,
@@ -1961,8 +2336,8 @@ create or replace function content.update_app_order_by_uuid(
 returns uuid language plpgsql as $$
 declare v_id uuid;
 begin
-    perform util.validate_exists_by_id('app.users',    p_app_user_id);
-    perform util.validate_exists_by_id('app.users',    p_manager_id);
+    perform util.validate_exists_by_id('app.users',        p_app_user_id);
+    perform util.validate_exists_by_id('app.users',        p_manager_id);
     perform util.validate_exists_by_id('content.requests', p_app_request_id);
 
     if p_comment is not null then
@@ -1981,23 +2356,39 @@ begin
     where id = p_id and is_deleted = false
     returning id into v_id;
 
+    if v_id is null then
+        raise exception 'update_app_order_by_uuid: order not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
+
     return v_id;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'update_app_order_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
--- -------------------------------
--- delete 1 (soft) / restore 1
--- -------------------------------
 create or replace function content.delete_app_order_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.orders', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.orders', p_id, true);
+exception
+    when others then
+        raise exception 'delete_app_order_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_app_order_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.orders', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.orders', p_id, false);
+exception
+    when others then
+        raise exception 'restore_app_order_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -2026,14 +2417,21 @@ begin
     if found then return util.set_entity_lifecycle('content.statuses', v_id, false); end if;
     insert into content.statuses (name) values (p_name) returning id into v_id;
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_app_status: %', sqlerrm
+            using detail = format('name = %L', p_name), errcode = sqlstate;
 end;
 $$;
 
 create or replace function content.get_app_statuses()
 returns setof content.statuses language plpgsql as $$
-begin return query select * from content.statuses where is_deleted = false;
-exception when others then return; end;
+begin
+    return query select * from content.statuses where is_deleted = false;
+exception
+    when others then
+        raise exception 'get_app_statuses: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.get_app_status_by_uuid(p_id uuid)
@@ -2041,8 +2439,16 @@ returns content.statuses language plpgsql as $$
 declare v_row content.statuses;
 begin
     select * into v_row from content.statuses where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_status_by_uuid: status not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_app_status_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.update_app_status_by_uuid(p_id uuid, p_name varchar(100))
@@ -2051,20 +2457,38 @@ declare v_id uuid;
 begin
     p_name := util.sanitize_text(p_name, 'name');
     update content.statuses set name = p_name where id = p_id and is_deleted = false returning id into v_id;
+    if v_id is null then
+        raise exception 'update_app_status_by_uuid: status not found or deleted, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_id;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'update_app_status_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.delete_app_status_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.statuses', p_id, true);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.statuses', p_id, true);
+exception
+    when others then
+        raise exception 'delete_app_status_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.restore_app_status_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
-begin return util.set_entity_lifecycle('content.statuses', p_id, false);
-exception when others then return null; end;
+begin
+    return util.set_entity_lifecycle('content.statuses', p_id, false);
+exception
+    when others then
+        raise exception 'restore_app_status_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -2101,7 +2525,11 @@ begin
     returning id into v_id;
 
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_app_request_status_history: %', sqlerrm
+            using detail  = format('status_id = %L, request_id = %L', p_app_status_id, p_app_request_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -2112,7 +2540,10 @@ begin
     select * from content.request_status_histories
     where is_deleted = false
     order by created_at desc;
-exception when others then return; end;
+exception
+    when others then
+        raise exception 'get_app_request_status_histories: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.get_app_request_status_history_by_uuid(p_id uuid)
@@ -2120,8 +2551,16 @@ returns content.request_status_histories language plpgsql as $$
 declare v_row content.request_status_histories;
 begin
     select * into v_row from content.request_status_histories where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_request_status_history_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_app_request_status_history_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
 
@@ -2156,7 +2595,11 @@ begin
     returning id into v_id;
 
     return v_id;
-exception when others then return null;
+exception
+    when others then
+        raise exception 'create_app_order_status_history: %', sqlerrm
+            using detail  = format('status_id = %L, order_id = %L', p_app_status_id, p_app_order_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -2167,7 +2610,10 @@ begin
     select * from content.order_status_histories
     where is_deleted = false
     order by created_at desc;
-exception when others then return; end;
+exception
+    when others then
+        raise exception 'get_app_order_status_histories: %', sqlerrm using errcode = sqlstate;
+end;
 $$;
 
 create or replace function content.get_app_order_status_history_by_uuid(p_id uuid)
@@ -2175,388 +2621,18 @@ returns content.order_status_histories language plpgsql as $$
 declare v_row content.order_status_histories;
 begin
     select * into v_row from content.order_status_histories where id = p_id and is_deleted = false;
+    if not found then
+        raise exception 'get_app_order_status_history_by_uuid: record not found, id = %', p_id
+            using errcode = 'no_data_found';
+    end if;
     return v_row;
-exception when others then return null; end;
+exception
+    when others then
+        raise exception 'get_app_order_status_history_by_uuid: %', sqlerrm
+            using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
 $$;
 
-
--- ============================================================
--- warn: drop roles in reverse dependency order
--- ============================================================
--- drop owned by role_guest;
--- drop role if exists role_guest;
--- drop owned by role_user;
--- drop role if exists role_user;
--- drop owned by role_manager;
--- drop role if exists role_manager;
--- drop owned by role_admin;
--- drop role if exists role_admin;
-
-
--- ============================================================
--- ROLES
--- ============================================================
-create role role_guest   nologin;
-create role role_user    nologin;
-create role role_manager nologin;
-create role role_admin   nologin;
-
-
--- ============================================================
--- GRANT EXECUTE на util-функции
--- все роли могут вызывать utils через CRUD-функции
--- ============================================================
-grant execute on function util.sanitize_text(text, text)                 to role_guest, role_user, role_manager, role_admin;
-grant execute on function util.is_record_active(text, uuid)              to role_guest, role_user, role_manager, role_admin;
-grant execute on function util.validate_exists_by_id(text, uuid)         to role_guest, role_user, role_manager, role_admin;
-grant execute on function util.set_entity_lifecycle(text, uuid, boolean) to role_user, role_manager, role_admin;
-
-
--- ============================================================
--- GRANT EXECUTE на CRUD-функции
--- ============================================================
-
--- -------------------------------
--- app.roles
--- admin: R C U D
--- -------------------------------
-grant execute on function app.get_app_roles()                        to role_admin;
-grant execute on function app.get_app_role_by_uuid(uuid)             to role_admin;
-grant execute on function app.create_app_role(varchar)               to role_admin;
-grant execute on function app.update_app_role_by_uuid(uuid, varchar) to role_admin;
-grant execute on function app.delete_app_role_by_uuid(uuid)          to role_admin;
-grant execute on function app.restore_app_role_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- profile.user_profiles
--- user:    R C U own
--- manager: R C U own
--- admin:   R C U D
--- [note] own реализуется через RLS — см. ниже
--- -------------------------------
-grant execute on function profile.get_app_user_profiles()                              to role_user, role_manager, role_admin;
-grant execute on function profile.get_app_user_profile_by_uuid(uuid)                   to role_user, role_manager, role_admin;
-grant execute on function profile.create_app_user_profile(varchar, uuid)               to role_user, role_manager, role_admin;
-grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid) to role_user, role_manager, role_admin;
-grant execute on function profile.delete_app_user_profile_by_uuid(uuid)                to role_admin;
-grant execute on function profile.restore_app_user_profile_by_uuid(uuid)               to role_admin;
-
--- -------------------------------
--- app.users
--- user:    R C U own
--- manager: R C U own
--- admin:   R C U D
--- -------------------------------
-grant execute on function app.get_app_users()                                       to role_user, role_manager, role_admin;
-grant execute on function app.get_app_user_by_uuid(uuid)                            to role_user, role_manager, role_admin;
-grant execute on function app.create_app_user(varchar, varchar, uuid)               to role_user, role_manager, role_admin;
-grant execute on function app.update_app_user_by_uuid(uuid, varchar, varchar, uuid) to role_user, role_manager, role_admin;
-grant execute on function app.delete_app_user_by_uuid(uuid)                         to role_admin;
-grant execute on function app.restore_app_user_by_uuid(uuid)                        to role_admin;
-
--- -------------------------------
--- content.brands
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_brands()                        to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_brand_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_brand(varchar)               to role_admin;
-grant execute on function content.update_brand_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_brand_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_brand_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- content.drive_types
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_drive_types()                        to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_drive_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_drive_type(varchar)               to role_admin;
-grant execute on function content.update_drive_type_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_drive_type_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_drive_type_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- content.transmission_types
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_transmission_types()                        to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_transmission_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_transmission_type(varchar)               to role_admin;
-grant execute on function content.update_transmission_type_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_transmission_type_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_transmission_type_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- content.usage_types
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_usage_types()                        to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_usage_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_usage_type(varchar)               to role_admin;
-grant execute on function content.update_usage_type_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_usage_type_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_usage_type_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- content.capacity_types
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_capacity_types()                        to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_capacity_type_by_uuid(uuid)             to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_capacity_type(varchar)               to role_admin;
-grant execute on function content.update_capacity_type_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_capacity_type_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_capacity_type_by_uuid(uuid)         to role_admin;
-
--- -------------------------------
--- content.capacities
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_capacities()                         to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_capacity_by_uuid(uuid)               to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_capacity(int, uuid)               to role_admin;
-grant execute on function content.update_capacity_by_uuid(uuid, int, uuid) to role_admin;
-grant execute on function content.delete_capacity_by_uuid(uuid)            to role_admin;
-grant execute on function content.restore_capacity_by_uuid(uuid)           to role_admin;
-
--- -------------------------------
--- content.cars
--- guest: R  |  user: R  |  manager: R  |  admin: R C U D
--- -------------------------------
-grant execute on function content.get_cars()                                                                                    to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.get_car_by_uuid(uuid)                                                                         to role_guest, role_user, role_manager, role_admin;
-grant execute on function content.create_car(varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid)               to role_admin;
-grant execute on function content.update_car_by_uuid(uuid, varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid) to role_admin;
-grant execute on function content.delete_car_by_uuid(uuid)                                                                      to role_admin;
-grant execute on function content.restore_car_by_uuid(uuid)                                                                     to role_admin;
-
--- -------------------------------
--- junction.user_profile_cars
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_app_user_profile_cars()                to role_user, role_manager, role_admin;
-grant execute on function junction.get_app_user_profile_car_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_app_user_profile_car(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_app_user_profile_car_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_app_user_profile_car_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- junction.profile_filter_brands
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_profile_filter_brands()                to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_brand_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_brand(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_brand_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_brand_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- junction.profile_filter_drive_types
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_profile_filter_drive_types()                to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_drive_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_drive_type(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_drive_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_drive_type_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- junction.profile_filter_transmission_types
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_profile_filter_transmission_types()                to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_transmission_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_transmission_type(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_transmission_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_transmission_type_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- junction.profile_filter_usage_types
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_profile_filter_usage_types()                to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_usage_type_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_usage_type(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_usage_type_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_usage_type_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- junction.profile_filter_capacities
--- user:    R C D own
--- manager: R C D own
--- admin:   R C U D
--- -------------------------------
-grant execute on function junction.get_profile_filter_capacities()               to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_capacity_by_uuid(uuid)     to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_capacity(uuid, uuid)    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_capacity_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_capacity_by_uuid(uuid) to role_user, role_manager, role_admin;
-
--- -------------------------------
--- content.requests
--- user:    R C own
--- manager: R all C U D
--- admin:   R C U D
--- -------------------------------
-grant execute on function content.get_app_requests()                                 to role_user, role_manager, role_admin;
-grant execute on function content.get_app_request_by_uuid(uuid)                      to role_user, role_manager, role_admin;
-grant execute on function content.create_app_request(uuid, uuid, text)               to role_user, role_manager, role_admin;
-grant execute on function content.update_app_request_by_uuid(uuid, uuid, uuid, text) to role_manager, role_admin;
-grant execute on function content.delete_app_request_by_uuid(uuid)                   to role_manager, role_admin;
-grant execute on function content.restore_app_request_by_uuid(uuid)                  to role_manager, role_admin;
-
--- -------------------------------
--- content.orders
--- user:    R own
--- manager: R all C U
--- admin:   R C U D
--- -------------------------------
-grant execute on function content.get_app_orders()                                                                    to role_user, role_manager, role_admin;
-grant execute on function content.get_app_order_by_uuid(uuid)                                                         to role_user, role_manager, role_admin;
-grant execute on function content.create_app_order(date, int, numeric, numeric, uuid, uuid, uuid, text)               to role_manager, role_admin;
-grant execute on function content.update_app_order_by_uuid(uuid, date, int, numeric, numeric, uuid, uuid, uuid, text) to role_manager, role_admin;
-grant execute on function content.delete_app_order_by_uuid(uuid)                                                      to role_admin;
-grant execute on function content.restore_app_order_by_uuid(uuid)                                                     to role_admin;
-
-
--- -------------------------------
--- content.statuses
--- manager: R
--- admin:   R C U D
--- -------------------------------
-grant execute on function content.get_app_statuses()                       to role_manager, role_admin;
-grant execute on function content.get_app_status_by_uuid(uuid)             to role_manager, role_admin;
-grant execute on function content.create_app_status(varchar)               to role_admin;
-grant execute on function content.update_app_status_by_uuid(uuid, varchar) to role_admin;
-grant execute on function content.delete_app_status_by_uuid(uuid)          to role_admin;
-grant execute on function content.restore_app_status_by_uuid(uuid)         to role_admin;
-
-
--- -------------------------------
--- content.request_status_histories
--- user:    R own
--- manager: R all C
--- admin:   R C
--- [note] append-only — delete/restore нет ни у кого
--- -------------------------------
-grant execute on function content.get_app_request_status_histories()            to role_user, role_manager, role_admin;
-grant execute on function content.get_app_request_status_history_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function content.create_app_request_status_history(uuid, uuid) to role_manager, role_admin;
-
-
--- -------------------------------
--- content.order_status_histories
--- user:    R own
--- manager: R all C
--- admin:   R C
--- [note] append-only — delete/restore нет ни у кого
--- -------------------------------
-grant execute on function content.get_app_order_status_histories()            to role_user, role_manager, role_admin;
-grant execute on function content.get_app_order_status_history_by_uuid(uuid)  to role_user, role_manager, role_admin;
-grant execute on function content.create_app_order_status_history(uuid, uuid) to role_manager, role_admin;
-
-
-
--- ============================================================
--- TABLE-LEVEL GRANT
--- ============================================================
-
-
--- -------------------------------
--- SELECT — все таблицы
--- нужен для get*, is_record_active, validate_exists_by_id
--- -------------------------------
-grant select on
-    app.roles,
-    profile.user_profiles,
-    app.users,
-    content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
-    content.capacities,
-    content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
-    content.requests,
-    content.orders,
-    content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
-to role_guest, role_user, role_manager, role_admin;
-
-
--- -------------------------------
--- INSERT — все таблицы
--- нужен для create_*
--- -------------------------------
-grant insert on
-    app.roles,
-    profile.user_profiles,
-    app.users,
-    content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
-    content.capacities,
-    content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
-    content.requests,
-    content.orders,
-    content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
-to role_user, role_manager, role_admin;
-
-
--- -------------------------------
--- UPDATE — не-history таблицы
--- нужен для update_*, delete_* soft, restore_*
--- history — только append, update не нужен
--- -------------------------------
-grant update on
-    app.roles,
-    profile.user_profiles,
-    app.users,
-    content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
-    content.capacities,
-    content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
-    content.requests,
-    content.orders,
-    content.statuses
-to role_user, role_manager, role_admin;
 
 -- ============================================================
 -- AUDIT SCHEMA — таблица и триггер логирования DML
@@ -2656,9 +2732,737 @@ select audit.attach_dml_trigger('junction', 'profile_filter_capacities');
 
 
 -- ─── права на audit ─────────────────────────────────────────
--- роли не имеют прямого доступа к audit.dml_logs — только через security definer функцию
--- только admin может читать логи напрямую
-grant select on audit.dml_logs to role_admin;
+-- [note] прямой SELECT на audit.dml_logs — только admin (выдан выше в TABLE-LEVEL GRANTS)
+-- [note] роли не имеют прямого доступа к audit.dml_logs — только через security definer триггер
+-- [note] attach_dml_trigger вызывается при инициализации, не нужен ролям приложения
 
--- execute на вспомогательные audit-функции — только для суперпользователя/владельца БД
--- attach_dml_trigger вызывается при инициализации, не нужен ролям приложения
+
+
+
+
+
+-- ============================================================
+-- warn: drop roles in reverse dependency order
+-- ============================================================
+-- drop owned by role_guest;
+-- drop role if exists role_guest;
+-- drop owned by role_user;
+-- drop role if exists role_user;
+-- drop owned by role_manager;
+-- drop role if exists role_manager;
+-- drop owned by role_admin;
+-- drop role if exists role_admin;
+
+
+-- ============================================================
+-- ROLES (group roles, NOLOGIN)
+-- ============================================================
+do
+$$
+begin
+    if not exists (select 1 from pg_roles where rolname = 'role_guest') then
+        create role role_guest nologin;
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'role_user') then
+        create role role_user nologin;
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'role_manager') then
+        create role role_manager nologin;
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'role_admin') then
+        create role role_admin nologin;
+    end if;
+end;
+$$;
+
+
+-- ============================================================
+-- USERS (login roles)
+-- ============================================================
+do
+$$
+begin
+    if not exists (select 1 from pg_roles where rolname = 'guest_user') then
+        create role guest_user login password 'guest_123';
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'app_user') then
+        create role app_user login password 'user_123';
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'manager_user') then
+        create role manager_user login password 'manager_123';
+    end if;
+
+    if not exists (select 1 from pg_roles where rolname = 'admin_user') then
+        create role admin_user login password 'admin_123';
+    end if;
+end;
+$$;
+
+grant role_guest   to guest_user;
+grant role_user    to app_user;
+grant role_manager to manager_user;
+grant role_admin   to admin_user;
+
+
+-- ============================================================
+-- DB-LEVEL GRANTS
+-- ============================================================
+grant connect on database postgres
+    to role_guest, role_user, role_manager, role_admin;
+
+
+-- ============================================================
+-- SCHEMA-LEVEL GRANTS
+-- ============================================================
+-- [note] USAGE on schema позволяет "видеть" объекты схемы по имени,
+--        но НЕ даёт SELECT на таблицы — это отдельный grant.
+--        Поэтому здесь выдаём USAGE всем, а SELECT — строго по матрице.
+grant usage on schema app, profile, content, junction, util, audit
+    to role_guest, role_user, role_manager, role_admin;
+
+
+-- ============================================================
+-- UTIL FUNCTIONS
+-- ============================================================
+-- [note] util.set_entity_lifecycle доступна только тем, кто может мутировать данные
+grant execute on function util.sanitize_text(text, text)
+    to role_guest, role_user, role_manager, role_admin;
+
+grant execute on function util.is_record_active(text, uuid)
+    to role_guest, role_user, role_manager, role_admin;
+
+grant execute on function util.validate_exists_by_id(text, uuid)
+    to role_guest, role_user, role_manager, role_admin;
+
+grant execute on function util.set_entity_lifecycle(text, uuid, boolean)
+    to role_user, role_manager, role_admin;
+
+
+-- ============================================================
+-- FUNCTION-LEVEL GRANTS (CRUD по матрице)
+-- ============================================================
+
+-- ── app.roles ────────────────────────────────────────────────
+-- matrix: guest=—, user=—, manager=—, admin=R/C/U/D
+grant execute on function app.get_app_roles()
+    to role_admin;
+grant execute on function app.get_app_role_by_uuid(uuid)
+    to role_admin;
+grant execute on function app.create_app_role(varchar)
+    to role_admin;
+grant execute on function app.update_app_role_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function app.delete_app_role_by_uuid(uuid)
+    to role_admin;
+grant execute on function app.restore_app_role_by_uuid(uuid)
+    to role_admin;
+
+-- ── profile.user_profiles ───────────────────────────────────
+-- matrix: guest=—, user=R/C/U, manager=R/C/U, admin=R/C/U/D
+grant execute on function profile.get_app_user_profiles()
+    to role_user, role_manager, role_admin;
+grant execute on function profile.get_app_user_profile_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function profile.create_app_user_profile(varchar, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function profile.delete_app_user_profile_by_uuid(uuid)
+    to role_admin;
+grant execute on function profile.restore_app_user_profile_by_uuid(uuid)
+    to role_admin;
+
+-- ── app.users ────────────────────────────────────────────────
+-- matrix: guest=—, user=R/C/U, manager=R/C/U, admin=R/C/U/D
+grant execute on function app.get_app_users()
+    to role_user, role_manager, role_admin;
+grant execute on function app.get_app_user_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function app.create_app_user(varchar, varchar, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function app.update_app_user_by_uuid(uuid, varchar, varchar, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function app.delete_app_user_by_uuid(uuid)
+    to role_admin;
+grant execute on function app.restore_app_user_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.brands ───────────────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_brands()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_brand_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_brand(varchar)
+    to role_admin;
+grant execute on function content.update_brand_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_brand_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_brand_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.drive_types ──────────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_drive_types()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_drive_type_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_drive_type(varchar)
+    to role_admin;
+grant execute on function content.update_drive_type_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_drive_type_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_drive_type_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.transmission_types ───────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_transmission_types()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_transmission_type_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_transmission_type(varchar)
+    to role_admin;
+grant execute on function content.update_transmission_type_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_transmission_type_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_transmission_type_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.usage_types ──────────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_usage_types()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_usage_type_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_usage_type(varchar)
+    to role_admin;
+grant execute on function content.update_usage_type_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_usage_type_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_usage_type_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.capacity_types ───────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_capacity_types()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_capacity_type_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_capacity_type(varchar)
+    to role_admin;
+grant execute on function content.update_capacity_type_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_capacity_type_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_capacity_type_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.capacities ───────────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_capacities()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_capacity_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_capacity(int, uuid)
+    to role_admin;
+grant execute on function content.update_capacity_by_uuid(uuid, int, uuid)
+    to role_admin;
+grant execute on function content.delete_capacity_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_capacity_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.cars ─────────────────────────────────────────────
+-- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+grant execute on function content.get_cars()
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.get_car_by_uuid(uuid)
+    to role_guest, role_user, role_manager, role_admin;
+grant execute on function content.create_car(
+    varchar, numeric, date, varchar, text,
+    uuid, uuid, uuid, uuid, uuid
+) to role_admin;
+grant execute on function content.update_car_by_uuid(
+    uuid, varchar, numeric, date, varchar, text,
+    uuid, uuid, uuid, uuid, uuid
+) to role_admin;
+grant execute on function content.delete_car_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_car_by_uuid(uuid)
+    to role_admin;
+
+-- ── junction.user_profile_cars ───────────────────────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_app_user_profile_cars()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_app_user_profile_car_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_app_user_profile_car(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_app_user_profile_car_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_app_user_profile_car_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── junction.profile_filter_brands ──────────────────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_profile_filter_brands()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_profile_filter_brand_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_profile_filter_brand(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_profile_filter_brand_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_profile_filter_brand_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── junction.profile_filter_drive_types ─────────────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_profile_filter_drive_types()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_profile_filter_drive_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_profile_filter_drive_type(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_profile_filter_drive_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_profile_filter_drive_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── junction.profile_filter_transmission_types ──────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_profile_filter_transmission_types()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_profile_filter_transmission_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_profile_filter_transmission_type(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_profile_filter_transmission_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_profile_filter_transmission_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── junction.profile_filter_usage_types ─────────────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_profile_filter_usage_types()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_profile_filter_usage_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_profile_filter_usage_type(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_profile_filter_usage_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_profile_filter_usage_type_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── junction.profile_filter_capacities ──────────────────────
+-- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
+grant execute on function junction.get_profile_filter_capacities()
+    to role_user, role_manager, role_admin;
+grant execute on function junction.get_profile_filter_capacity_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.create_profile_filter_capacity(uuid, uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.delete_profile_filter_capacity_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function junction.restore_profile_filter_capacity_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+
+-- ── content.requests ─────────────────────────────────────────
+-- matrix: guest=—, user=R/C, manager=R/C/U/D, admin=R/C/U/D
+grant execute on function content.get_app_requests()
+    to role_user, role_manager, role_admin;
+grant execute on function content.get_app_request_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function content.create_app_request(uuid, uuid, text)
+    to role_user, role_manager, role_admin;
+grant execute on function content.update_app_request_by_uuid(uuid, uuid, uuid, text)
+    to role_manager, role_admin;
+grant execute on function content.delete_app_request_by_uuid(uuid)
+    to role_manager, role_admin;
+grant execute on function content.restore_app_request_by_uuid(uuid)
+    to role_manager, role_admin;
+
+-- ── content.orders ───────────────────────────────────────────
+-- matrix: guest=—, user=R, manager=R/C/U, admin=R/C/U/D
+grant execute on function content.get_app_orders()
+    to role_user, role_manager, role_admin;
+grant execute on function content.get_app_order_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function content.create_app_order(
+    date, int, numeric, numeric, uuid, uuid, uuid, text
+) to role_manager, role_admin;
+grant execute on function content.update_app_order_by_uuid(
+    uuid, date, int, numeric, numeric, uuid, uuid, uuid, text
+) to role_manager, role_admin;
+grant execute on function content.delete_app_order_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_app_order_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.statuses ─────────────────────────────────────────
+-- matrix: guest=—, user=—, manager=R, admin=R/C/U/D
+grant execute on function content.get_app_statuses()
+    to role_manager, role_admin;
+grant execute on function content.get_app_status_by_uuid(uuid)
+    to role_manager, role_admin;
+grant execute on function content.create_app_status(varchar)
+    to role_admin;
+grant execute on function content.update_app_status_by_uuid(uuid, varchar)
+    to role_admin;
+grant execute on function content.delete_app_status_by_uuid(uuid)
+    to role_admin;
+grant execute on function content.restore_app_status_by_uuid(uuid)
+    to role_admin;
+
+-- ── content.request_status_histories ────────────────────────
+-- matrix: guest=—, user=R, manager=R/C, admin=R/C  (append-only)
+grant execute on function content.get_app_request_status_histories()
+    to role_user, role_manager, role_admin;
+grant execute on function content.get_app_request_status_history_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function content.create_app_request_status_history(uuid, uuid)
+    to role_manager, role_admin;
+
+-- ── content.order_status_histories ──────────────────────────
+-- matrix: guest=—, user=R, manager=R/C, admin=R/C  (append-only)
+grant execute on function content.get_app_order_status_histories()
+    to role_user, role_manager, role_admin;
+grant execute on function content.get_app_order_status_history_by_uuid(uuid)
+    to role_user, role_manager, role_admin;
+grant execute on function content.create_app_order_status_history(uuid, uuid)
+    to role_manager, role_admin;
+
+
+-- ============================================================
+-- TABLE-LEVEL GRANTS (строго по матрице)
+-- ============================================================
+-- [fix] В оригинале GRANT SELECT выдавался на все таблицы всем четырём ролям,
+--       включая role_guest — что давало гостю прямой SELECT на app.users,
+--       profile.user_profiles и другие закрытые таблицы.
+--
+--       Правило: таблицы, закрытые для guest (и для user), должны быть
+--       явно исключены из соответствующих GRANT.
+--
+--       Доступ через прямой SQL к таблицам нужен утилитным функциям
+--       (util.is_record_active, security definer триггерам).
+--       Прикладные роли используют только функции — поэтому таблично-уровневые
+--       права выдаём ровно в том объёме, который нужен для работы функций.
+
+-- ── SELECT ───────────────────────────────────────────────────
+
+-- guest: только справочники и автомобили
+grant select on
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars
+to role_guest;
+
+-- user/manager/admin: все таблицы кроме audit (admin получит отдельно)
+-- [note] app.roles — только admin, потому матрица: guest=—, user=—, manager=—, admin=R
+grant select on
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    junction.user_profile_cars,
+    junction.profile_filter_brands,
+    junction.profile_filter_drive_types,
+    junction.profile_filter_transmission_types,
+    junction.profile_filter_usage_types,
+    junction.profile_filter_capacities,
+    content.requests,
+    content.orders,
+    content.request_status_histories,
+    content.order_status_histories
+to role_user;
+
+-- manager видит всё что user + content.statuses
+grant select on
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    junction.user_profile_cars,
+    junction.profile_filter_brands,
+    junction.profile_filter_drive_types,
+    junction.profile_filter_transmission_types,
+    junction.profile_filter_usage_types,
+    junction.profile_filter_capacities,
+    content.requests,
+    content.orders,
+    content.statuses,
+    content.request_status_histories,
+    content.order_status_histories
+to role_manager;
+
+-- admin — полный доступ ко всем таблицам включая app.roles и audit
+grant select on
+    app.roles,
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    junction.user_profile_cars,
+    junction.profile_filter_brands,
+    junction.profile_filter_drive_types,
+    junction.profile_filter_transmission_types,
+    junction.profile_filter_usage_types,
+    junction.profile_filter_capacities,
+    content.requests,
+    content.orders,
+    content.statuses,
+    content.request_status_histories,
+    content.order_status_histories,
+    audit.dml_logs
+to role_admin;
+
+-- ── INSERT ───────────────────────────────────────────────────
+-- [note] guest не может ничего создавать я решил что может только пользоватлея
+
+grant insert on
+   app.users
+to role_user;
+
+grant insert on
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    junction.user_profile_cars,
+    junction.profile_filter_brands,
+    junction.profile_filter_drive_types,
+    junction.profile_filter_transmission_types,
+    junction.profile_filter_usage_types,
+    junction.profile_filter_capacities,
+    content.requests,
+    content.orders,
+    content.statuses,
+    content.request_status_histories,
+    content.order_status_histories
+to role_user, role_manager, role_admin;
+
+-- app.roles — только admin
+grant insert on app.roles to role_admin;
+
+-- ── UPDATE ───────────────────────────────────────────────────
+-- [note] is_deleted обновляется через util.set_entity_lifecycle,
+--        поэтому UPDATE нужен ровно на тех таблицах, где есть soft-delete.
+--        Таблицы-истории (append-only) — без UPDATE.
+grant update on
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    junction.user_profile_cars,
+    junction.profile_filter_brands,
+    junction.profile_filter_drive_types,
+    junction.profile_filter_transmission_types,
+    junction.profile_filter_usage_types,
+    junction.profile_filter_capacities,
+    content.requests,
+    content.orders,
+    content.statuses
+to role_user, role_manager, role_admin;
+
+-- app.roles — только admin
+grant update on app.roles to role_admin;
+
+
+
+-- ============================================================
+-- SETUP-REPLICATION
+-- ============================================================
+-- ─── master ─────────────────────────────────────────────────
+-- create role repl_user
+--     with login replication password '111';
+
+-- grant connect on database postgres to repl_user;
+
+-- grant usage on schema app, profile, content, junction, util, audit to repl_user;
+-- grant select on all tables in schema app, profile, content, junction, util, audit to repl_user;
+
+-- alter default privileges in schema app, profile, content, junction, util, audit
+--     grant select on tables to repl_user;
+
+
+-- create publication postgres_pub_all
+--     for tables in schema app, profile, content, junction, util, audit;
+
+
+-- show wal_level;
+-- alter system set wal_level = 'logical';
+-- ─── slave-1 ──────────────────────────────────────────────────
+-- create subscription postgres_sub_all_slave_1
+--     connection 'host=postgres-master port=5432 dbname=postgres user=repl_user password=111'
+--     publication postgres_pub_all
+--     with (
+--         copy_data = false,
+--         enabled   = true
+--     );
+
+
+-- ─── slave-2 ──────────────────────────────────────────────────
+-- create subscription postgres_sub_all_slave_2
+--     connection 'host=postgres-master port=5432 dbname=postgres user=repl_user password=111'
+--     publication postgres_pub_all
+--     with (
+--         copy_data = false,
+--         enabled   = true
+--     );
+
+
+-- create table if not exists util.export_buffer (
+--     id   serial primary key,
+--     data text not null
+-- );
+
+-- create or replace procedure content.export_cars_to_json()
+-- language plpgsql
+-- as $$
+-- begin
+--     truncate table util.export_buffer;
+
+--     insert into util.export_buffer(data)
+--     select coalesce(
+--                jsonb_agg(
+--                    jsonb_build_object(
+--                        'id', c.id,
+--                        'name', c.name,
+--                        'price_of_origin', c.price_of_origin,
+--                        'manufacture_date', c.manufacture_date,
+--                        'country_of_origin', c.country_of_origin,
+--                        'description', c.description,
+--                        'is_deleted', c.is_deleted,
+--                        'brand_id', c.brand_id,
+--                        'drive_type_id', c.drive_type_id,
+--                        'transmission_type_id', c.transmission_type_id,
+--                        'usage_type_id', c.usage_type_id,
+--                        'capacity_id', c.capacity_id
+--                    )
+--                ),
+--                '[]'::jsonb
+--            )::text
+--     from content.cars c
+--     where c.is_deleted = false;
+-- end;
+-- $$;
+
+-- create or replace procedure content.import_cars_from_json(p_file_path text)
+-- language plpgsql
+-- as $$
+-- begin
+--     create temp table if not exists tmp_json_import (
+--         data jsonb
+--     ) on commit drop;
+
+--     truncate table tmp_json_import;
+
+--     execute format(
+--         'copy tmp_json_import(data) from %L',
+--         p_file_path
+--     );
+
+--     if not exists (select 1 from tmp_json_import) then
+--         raise exception 'Файл импорта пуст или не был загружен: %', p_file_path;
+--     end if;
+
+--     insert into content.cars (
+--         name,
+--         price_of_origin,
+--         manufacture_date,
+--         country_of_origin,
+--         description,
+--         brand_id,
+--         drive_type_id,
+--         transmission_type_id,
+--         usage_type_id,
+--         capacity_id
+--     )
+--     select
+--         x.name,
+--         x.price_of_origin,
+--         x.manufacture_date,
+--         x.country_of_origin,
+--         x.description,
+--         x.brand_id,
+--         x.drive_type_id,
+--         x.transmission_type_id,
+--         x.usage_type_id,
+--         x.capacity_id
+--     from tmp_json_import t,
+--          jsonb_to_recordset(t.data) as x(
+--              name varchar(100),
+--              price_of_origin numeric(12,2),
+--              manufacture_date date,
+--              country_of_origin varchar(100),
+--              description text,
+--              brand_id uuid,
+--              drive_type_id uuid,
+--              transmission_type_id uuid,
+--              usage_type_id uuid,
+--              capacity_id uuid
+--          );
+-- end;
+-- $$;
+
+
+-- call content.export_cars_to_json();
+-- \copy (
+--     select data from util.export_buffer
+-- ) to '/var/lib/postgresql/18/docker/cars.json';
+-- truncate table content.cars cascade;
+
+-- select * from content.cars;
+-- call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
+
+
+
+
+
+
+
+
+
+
+
