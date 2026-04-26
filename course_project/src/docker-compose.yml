@@ -13,17 +13,37 @@ services:
             - "${DB_PORT_FROM_MASTER}:${DB_PORT_TO_MASTER}"
         volumes:
             - ${DB_VOLUME_MASTER}
-    postgres-slave:
+        command: >
+            postgres
+            -c wal_level=logical
+            -c max_wal_senders=10
+            -c max_replication_slots=10
+
+    postgres-slave-1:
         image: "${DB_IMAGE}:${DB_VERSION}"
-        container_name: "${DB_IMAGE}-${DB_VERSION}-slave"
+        container_name: "${DB_IMAGE}-${DB_VERSION}-slave-1"
         environment:
             POSTGRES_DB: ${DB_NAME}
             POSTGRES_USER: ${DB_ADMIN}
             POSTGRES_PASSWORD: ${DB_ADMIN_PASS}
         ports:
-            - "${DB_PORT_FROM_SLAVE}:${DB_PORT_TO_SLAVE}"
+            - "${DB_PORT_FROM_SLAVE_1}:${DB_PORT_TO_SLAVE_1}"
         volumes:
-            - ${DB_VOLUME_SLAVE}
+            - ${DB_VOLUME_SLAVE_1}
+
+    postgres1-slave-2:
+        image: "${DB_IMAGE}:${DB_VERSION}"
+        container_name: "${DB_IMAGE}-${DB_VERSION}-slave-2"
+        environment:
+            POSTGRES_DB: ${DB_NAME}
+            POSTGRES_USER: ${DB_ADMIN}
+            POSTGRES_PASSWORD: ${DB_ADMIN_PASS}
+        ports:
+            - "${DB_PORT_FROM_SLAVE_2}:${DB_PORT_TO_SLAVE_2}"
+        volumes:
+            - ${DB_VOLUME_SLAVE_2}
 
 volumes:
-    EDU:
+    postgres_master_data:
+    postgres_slave_1_data:
+    postgres_slave_2_data:
