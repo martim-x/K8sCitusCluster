@@ -1,7 +1,6 @@
 -- ============================================================
 -- seed.sql — начальные данные
 -- ============================================================
--- Запускать от суперпользователя после init-db-schemas.sql
 -- UUIDs: UUID7 (time-ordered, RFC 9562)
 -- ============================================================
 
@@ -243,11 +242,11 @@ values
 
 
 insert into content.statuses (id, name) values
-    ('019d85d4-098d-7bd3-9332-8c527243cae2', 'REQUEST_NEW'),
-    ('019d85d4-098d-7870-bed9-9b8865e726e0', 'REQUEST_REVIEW'),
-    ('019d85d4-098d-7107-b61a-c97f4203d1c0', 'REQUEST_APPROVED'),
-    ('019d85d4-098d-7019-8f15-2d1c0c844032', 'REQUEST_REJECTED'),
-    ('019d85d4-098d-74e2-bf41-f70e7ceccc7b', 'ORDER_CREATED'),
-    ('019d85d4-098d-7bd9-ae37-9090c732f9a8', 'ORDER_IN_PROGRESS'),
-    ('019d85d4-098d-7a60-a024-5076c9a2d045', 'ORDER_COMPLETED'),
+    -- ('019d85d4-098d-7bd3-9332-8c527243cae2', 'REQUEST_NEW'),
+    ('019d85d4-098d-7870-bed9-9b8865e726e0', 'REQUEST_PENDING'),
+    ('019d85d4-098d-7107-b61a-c97f4203d1c0', 'REQUEST_ACCEPTED'),
+    ('019d85d4-098d-7019-8f15-2d1c0c844032', 'REQUEST_CANCELLED'),
+    -- ('019d85d4-098d-74e2-bf41-f70e7ceccc7b', 'ORDER_CREATED'),
+    ('019d85d4-098d-7bd9-ae37-9090c732f9a8', 'ORDER_PENDING'),
+    ('019d85d4-098d-7a60-a024-5076c9a2d045', 'ORDER_ACCEPTED'),
     ('019d85d4-098d-7b70-8671-e37168ef9e6c', 'ORDER_CANCELLED');

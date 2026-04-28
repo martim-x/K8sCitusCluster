@@ -4,7 +4,6 @@
 create schema if not exists app;
 create schema if not exists profile;
 create schema if not exists content;
-create schema if not exists junction;
 create schema if not exists util;
 create schema if not exists audit;
 
@@ -28,13 +27,6 @@ create schema if not exists audit;
 -- drop table if exists content.orders cascade;
 -- drop table if exists content.requests cascade;
 
--- drop table if exists junction.profile_filter_brands cascade;
--- drop table if exists junction.profile_filter_drive_types cascade;
--- drop table if exists junction.profile_filter_transmission_types cascade;
--- drop table if exists junction.profile_filter_usage_types cascade;
--- drop table if exists junction.profile_filter_capacities cascade;
-
--- drop table if exists junction.user_profile_cars cascade;
 -- drop table if exists content.cars cascade;
 
 -- drop table if exists content.capacities cascade;
@@ -489,6 +481,54 @@ $$;
 
 
 -- -------------------------------
+-- get own
+-- -------------------------------
+create or replace function profile.get_own_app_user_profile(
+    p_current_user_id uuid
+)
+returns profile.user_profiles
+language plpgsql
+as $$
+declare
+    v_user app.users;
+    v_profile profile.user_profiles;
+begin
+    -- 1) находим активного пользователя
+    select *
+    into v_user
+    from app.users
+    where id = p_current_user_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_user_profile: user not found, id = %', p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    -- 2) находим профиль по FK
+    select *
+    into v_profile
+    from profile.user_profiles
+    where id = v_user.app_user_profile_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_user_profile: profile not found, id = %',
+            v_user.app_user_profile_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return v_profile;
+exception
+    when others then
+        raise exception 'get_own_app_user_profile: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
 -- update 1
 -- -------------------------------
 create or replace function profile.update_app_user_profile_by_uuid(
@@ -584,6 +624,10 @@ create table app.users (
 
 create index idx_app_user_id_hash
     on app.users using hash (id);
+
+
+create index if not exists idx_app_user_profile_id_hash2
+    on app.users using hash (app_user_profile_id);
 
 
 -- -------------------------------
@@ -682,6 +726,39 @@ exception
     when others then
         raise exception 'get_app_user_by_uuid: %', sqlerrm
             using detail  = format('id = %L', p_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own
+-- -------------------------------
+create or replace function app.get_own_app_user(
+    p_current_user_id uuid
+)
+returns app.users
+language plpgsql
+as $$
+declare
+    v_user app.users;
+begin
+    select *
+    into v_user
+    from app.users
+    where id = p_current_user_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_user: user not found, id = %', p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return v_user;
+exception
+    when others then
+        raise exception 'get_own_app_user: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
                   errcode = sqlstate;
 end;
 $$;
@@ -1561,541 +1638,6 @@ $$;
 
 
 -- ============================================================
--- APP_USER_PROFILE_CAR  (junction)
--- ============================================================
-create table junction.user_profile_cars (
-    id                  uuid    primary key default uuidv7(),
-
-    is_deleted          boolean not null default false,
-
-    app_user_profile_id uuid    not null references profile.user_profiles(id),
-    car_id              uuid    not null references content.cars(id)
-);
-
-create index idx_app_user_profile_car_id_hash
-    on junction.user_profile_cars using hash (id);
-
-create or replace function junction.create_app_user_profile_car(
-    p_app_user_profile_id uuid,
-    p_car_id              uuid
-)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.cars',          p_car_id);
-
-    select id into v_id from junction.user_profile_cars
-    where app_user_profile_id = p_app_user_profile_id
-      and car_id              = p_car_id
-      and is_deleted          = true;
-
-    if found then return util.set_entity_lifecycle('junction.user_profile_cars', v_id, false); end if;
-
-    insert into junction.user_profile_cars (app_user_profile_id, car_id)
-    values (p_app_user_profile_id, p_car_id)
-    returning id into v_id;
-
-    return v_id;
-exception
-    when others then
-        raise exception 'create_app_user_profile_car: %', sqlerrm
-            using detail  = format('profile_id = %L, car_id = %L', p_app_user_profile_id, p_car_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_app_user_profile_cars()
-returns setof junction.user_profile_cars language plpgsql as $$
-begin
-    return query select * from junction.user_profile_cars where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_app_user_profile_cars: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_app_user_profile_car_by_uuid(p_id uuid)
-returns junction.user_profile_cars language plpgsql as $$
-declare v_row junction.user_profile_cars;
-begin
-    select * into v_row from junction.user_profile_cars where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_app_user_profile_car_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_app_user_profile_car_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_app_user_profile_car_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.user_profile_cars', p_id, true);
-exception
-    when others then
-        raise exception 'delete_app_user_profile_car_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_app_user_profile_car_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.user_profile_cars', p_id, false);
-exception
-    when others then
-        raise exception 'restore_app_user_profile_car_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
--- PROFILE_FILTER_BRAND  (junction)
--- ============================================================
-create table junction.profile_filter_brands (
-    id                  uuid    primary key default uuidv7(),
-
-    is_deleted          boolean not null default false,
-
-    app_user_profile_id uuid    not null references profile.user_profiles(id),
-    brand_id            uuid    not null references content.brands(id)
-);
-
-create index idx_profile_filter_brand_id_hash
-    on junction.profile_filter_brands using hash (id);
-
-create or replace function junction.create_profile_filter_brand(p_app_user_profile_id uuid, p_brand_id uuid)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.brands',        p_brand_id);
-
-    select id into v_id from junction.profile_filter_brands
-    where app_user_profile_id = p_app_user_profile_id and brand_id = p_brand_id and is_deleted = true;
-
-    if found then return util.set_entity_lifecycle('junction.profile_filter_brands', v_id, false); end if;
-
-    insert into junction.profile_filter_brands (app_user_profile_id, brand_id)
-    values (p_app_user_profile_id, p_brand_id) returning id into v_id;
-    return v_id;
-exception
-    when others then
-        raise exception 'create_profile_filter_brand: %', sqlerrm
-            using detail  = format('profile_id = %L, brand_id = %L', p_app_user_profile_id, p_brand_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_brands()
-returns setof junction.profile_filter_brands language plpgsql as $$
-begin
-    return query select * from junction.profile_filter_brands where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_profile_filter_brands: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_brand_by_uuid(p_id uuid)
-returns junction.profile_filter_brands language plpgsql as $$
-declare v_row junction.profile_filter_brands;
-begin
-    select * into v_row from junction.profile_filter_brands where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_profile_filter_brand_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_profile_filter_brand_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_profile_filter_brand_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, true);
-exception
-    when others then
-        raise exception 'delete_profile_filter_brand_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_profile_filter_brand_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_brands', p_id, false);
-exception
-    when others then
-        raise exception 'restore_profile_filter_brand_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
--- PROFILE_FILTER_DRIVE_TYPE  (junction)
--- ============================================================
-create table junction.profile_filter_drive_types (
-    id                  uuid    primary key default uuidv7(),
-
-    is_deleted          boolean not null default false,
-
-    app_user_profile_id uuid    not null references profile.user_profiles(id),
-    drive_type_id       uuid    not null references content.drive_types(id)
-);
-
-create index idx_profile_filter_drive_type_id_hash
-    on junction.profile_filter_drive_types using hash (id);
-
-create or replace function junction.create_profile_filter_drive_type(p_app_user_profile_id uuid, p_drive_type_id uuid)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.drive_types',   p_drive_type_id);
-
-    select id into v_id from junction.profile_filter_drive_types
-    where app_user_profile_id = p_app_user_profile_id and drive_type_id = p_drive_type_id and is_deleted = true;
-
-    if found then return util.set_entity_lifecycle('junction.profile_filter_drive_types', v_id, false); end if;
-
-    insert into junction.profile_filter_drive_types (app_user_profile_id, drive_type_id)
-    values (p_app_user_profile_id, p_drive_type_id) returning id into v_id;
-    return v_id;
-exception
-    when others then
-        raise exception 'create_profile_filter_drive_type: %', sqlerrm
-            using detail  = format('profile_id = %L, drive_type_id = %L', p_app_user_profile_id, p_drive_type_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_drive_types()
-returns setof junction.profile_filter_drive_types language plpgsql as $$
-begin
-    return query select * from junction.profile_filter_drive_types where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_profile_filter_drive_types: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_drive_type_by_uuid(p_id uuid)
-returns junction.profile_filter_drive_types language plpgsql as $$
-declare v_row junction.profile_filter_drive_types;
-begin
-    select * into v_row from junction.profile_filter_drive_types where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_profile_filter_drive_type_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_profile_filter_drive_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_profile_filter_drive_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, true);
-exception
-    when others then
-        raise exception 'delete_profile_filter_drive_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_profile_filter_drive_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_drive_types', p_id, false);
-exception
-    when others then
-        raise exception 'restore_profile_filter_drive_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
--- PROFILE_FILTER_TRANSMISSION_TYPE  (junction)
--- ============================================================
-create table junction.profile_filter_transmission_types (
-    id                   uuid    primary key default uuidv7(),
-
-    is_deleted           boolean not null default false,
-
-    app_user_profile_id  uuid    not null references profile.user_profiles(id),
-    transmission_type_id uuid    not null references content.transmission_types(id)
-);
-
-create index idx_profile_filter_transmission_type_id_hash
-    on junction.profile_filter_transmission_types using hash (id);
-
-create or replace function junction.create_profile_filter_transmission_type(p_app_user_profile_id uuid, p_transmission_type_id uuid)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles',      p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.transmission_types', p_transmission_type_id);
-
-    select id into v_id from junction.profile_filter_transmission_types
-    where app_user_profile_id = p_app_user_profile_id and transmission_type_id = p_transmission_type_id and is_deleted = true;
-
-    if found then return util.set_entity_lifecycle('junction.profile_filter_transmission_types', v_id, false); end if;
-
-    insert into junction.profile_filter_transmission_types (app_user_profile_id, transmission_type_id)
-    values (p_app_user_profile_id, p_transmission_type_id) returning id into v_id;
-    return v_id;
-exception
-    when others then
-        raise exception 'create_profile_filter_transmission_type: %', sqlerrm
-            using detail  = format('profile_id = %L, transmission_type_id = %L', p_app_user_profile_id, p_transmission_type_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_transmission_types()
-returns setof junction.profile_filter_transmission_types language plpgsql as $$
-begin
-    return query select * from junction.profile_filter_transmission_types where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_profile_filter_transmission_types: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_transmission_type_by_uuid(p_id uuid)
-returns junction.profile_filter_transmission_types language plpgsql as $$
-declare v_row junction.profile_filter_transmission_types;
-begin
-    select * into v_row from junction.profile_filter_transmission_types where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_profile_filter_transmission_type_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_profile_filter_transmission_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_profile_filter_transmission_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, true);
-exception
-    when others then
-        raise exception 'delete_profile_filter_transmission_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_profile_filter_transmission_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_transmission_types', p_id, false);
-exception
-    when others then
-        raise exception 'restore_profile_filter_transmission_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
--- PROFILE_FILTER_USAGE_TYPE  (junction)
--- ============================================================
-create table junction.profile_filter_usage_types (
-    id                  uuid    primary key default uuidv7(),
-
-    is_deleted          boolean not null default false,
-
-    app_user_profile_id uuid    not null references profile.user_profiles(id),
-    usage_type_id       uuid    not null references content.usage_types(id)
-);
-
-create index idx_profile_filter_usage_type_id_hash
-    on junction.profile_filter_usage_types using hash (id);
-
-create or replace function junction.create_profile_filter_usage_type(p_app_user_profile_id uuid, p_usage_type_id uuid)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.usage_types',   p_usage_type_id);
-
-    select id into v_id from junction.profile_filter_usage_types
-    where app_user_profile_id = p_app_user_profile_id and usage_type_id = p_usage_type_id and is_deleted = true;
-
-    if found then return util.set_entity_lifecycle('junction.profile_filter_usage_types', v_id, false); end if;
-
-    insert into junction.profile_filter_usage_types (app_user_profile_id, usage_type_id)
-    values (p_app_user_profile_id, p_usage_type_id) returning id into v_id;
-    return v_id;
-exception
-    when others then
-        raise exception 'create_profile_filter_usage_type: %', sqlerrm
-            using detail  = format('profile_id = %L, usage_type_id = %L', p_app_user_profile_id, p_usage_type_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_usage_types()
-returns setof junction.profile_filter_usage_types language plpgsql as $$
-begin
-    return query select * from junction.profile_filter_usage_types where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_profile_filter_usage_types: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_usage_type_by_uuid(p_id uuid)
-returns junction.profile_filter_usage_types language plpgsql as $$
-declare v_row junction.profile_filter_usage_types;
-begin
-    select * into v_row from junction.profile_filter_usage_types where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_profile_filter_usage_type_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_profile_filter_usage_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_profile_filter_usage_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, true);
-exception
-    when others then
-        raise exception 'delete_profile_filter_usage_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_profile_filter_usage_type_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_usage_types', p_id, false);
-exception
-    when others then
-        raise exception 'restore_profile_filter_usage_type_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
--- PROFILE_FILTER_CAPACITY  (junction)
--- ============================================================
-create table junction.profile_filter_capacities (
-    id                  uuid    primary key default uuidv7(),
-
-    is_deleted          boolean not null default false,
-
-    app_user_profile_id uuid    not null references profile.user_profiles(id),
-    capacity_id         uuid    not null references content.capacities(id)
-);
-
-create index idx_profile_filter_capacity_id_hash
-    on junction.profile_filter_capacities using hash (id);
-
-create or replace function junction.create_profile_filter_capacity(p_app_user_profile_id uuid, p_capacity_id uuid)
-returns uuid language plpgsql as $$
-declare v_id uuid;
-begin
-    perform util.validate_exists_by_id('profile.user_profiles', p_app_user_profile_id);
-    perform util.validate_exists_by_id('content.capacities',    p_capacity_id);
-
-    select id into v_id from junction.profile_filter_capacities
-    where app_user_profile_id = p_app_user_profile_id and capacity_id = p_capacity_id and is_deleted = true;
-
-    if found then return util.set_entity_lifecycle('junction.profile_filter_capacities', v_id, false); end if;
-
-    insert into junction.profile_filter_capacities (app_user_profile_id, capacity_id)
-    values (p_app_user_profile_id, p_capacity_id) returning id into v_id;
-    return v_id;
-exception
-    when others then
-        raise exception 'create_profile_filter_capacity: %', sqlerrm
-            using detail  = format('profile_id = %L, capacity_id = %L', p_app_user_profile_id, p_capacity_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_capacities()
-returns setof junction.profile_filter_capacities language plpgsql as $$
-begin
-    return query select * from junction.profile_filter_capacities where is_deleted = false;
-exception
-    when others then
-        raise exception 'get_profile_filter_capacities: %', sqlerrm using errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.get_profile_filter_capacity_by_uuid(p_id uuid)
-returns junction.profile_filter_capacities language plpgsql as $$
-declare v_row junction.profile_filter_capacities;
-begin
-    select * into v_row from junction.profile_filter_capacities where id = p_id and is_deleted = false;
-    if not found then
-        raise exception 'get_profile_filter_capacity_by_uuid: record not found, id = %', p_id
-            using errcode = 'no_data_found';
-    end if;
-    return v_row;
-exception
-    when others then
-        raise exception 'get_profile_filter_capacity_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.delete_profile_filter_capacity_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, true);
-exception
-    when others then
-        raise exception 'delete_profile_filter_capacity_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-create or replace function junction.restore_profile_filter_capacity_by_uuid(p_id uuid)
-returns uuid language plpgsql as $$
-begin
-    return util.set_entity_lifecycle('junction.profile_filter_capacities', p_id, false);
-exception
-    when others then
-        raise exception 'restore_profile_filter_capacity_by_uuid: %', sqlerrm
-            using detail = format('id = %L', p_id), errcode = sqlstate;
-end;
-$$;
-
-
--- ============================================================
 -- APP_REQUEST
 -- ============================================================
 create table content.requests (
@@ -2111,6 +1653,13 @@ create table content.requests (
 create index idx_app_request_id_hash
     on content.requests using hash (id);
 
+create index if not exists idx_app_request_app_user_id_hash
+    on content.requests using hash (app_user_id);
+
+
+-- -------------------------------
+-- create
+-- -------------------------------
 create or replace function content.create_app_request(
     p_app_user_id uuid,
     p_car_id      uuid,
@@ -2144,6 +1693,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get many
+-- -------------------------------
 create or replace function content.get_app_requests()
 returns setof content.requests language plpgsql as $$
 begin
@@ -2171,6 +1724,71 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get own many
+-- -------------------------------
+create or replace function content.get_own_app_requests(
+    p_current_user_id uuid
+)
+returns setof content.requests
+language plpgsql
+as $$
+begin
+    return query
+    select *
+    from content.requests
+    where is_deleted = false
+      and app_user_id = p_current_user_id;
+exception
+    when others then
+        raise exception 'get_own_app_requests: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own 1
+-- -------------------------------
+create or replace function content.get_own_app_request_by_uuid(
+    p_current_user_id uuid,
+    p_request_id      uuid
+)
+returns content.requests
+language plpgsql
+as $$
+declare
+    v_row content.requests;
+begin
+    select *
+    into v_row
+    from content.requests
+    where id = p_request_id
+      and app_user_id = p_current_user_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_request_by_uuid: request not found or not owned, id = %, user_id = %',
+            p_request_id, p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return v_row;
+exception
+    when others then
+        raise exception 'get_own_app_request_by_uuid: %', sqlerrm
+            using detail  = format('request_id = %L, current_user_id = %L',
+                                   p_request_id, p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- update
+-- -------------------------------
 create or replace function content.update_app_request_by_uuid(
     p_id          uuid,
     p_app_user_id uuid,
@@ -2207,6 +1825,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- delete
+-- -------------------------------
 create or replace function content.delete_app_request_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
 begin
@@ -2218,6 +1840,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- restore
+-- -------------------------------
 create or replace function content.restore_app_request_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
 begin
@@ -2251,6 +1877,14 @@ create table content.orders (
 create index idx_app_order_id_hash
     on content.orders using hash (id);
 
+
+create index if not exists idx_app_order_app_user_id_hash
+    on content.orders using hash (app_user_id);
+
+
+-- -------------------------------
+-- create
+-- -------------------------------
 create or replace function content.create_app_order(
     p_order_date      date,
     p_period_months   int,
@@ -2295,6 +1929,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get many
+-- -------------------------------
 create or replace function content.get_app_orders()
 returns setof content.orders language plpgsql as $$
 begin
@@ -2305,6 +1943,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get 1
+-- -------------------------------
 create or replace function content.get_app_order_by_uuid(p_id uuid)
 returns content.orders language plpgsql as $$
 declare v_row content.orders;
@@ -2322,6 +1964,71 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get own many
+-- -------------------------------
+create or replace function content.get_own_app_orders(
+    p_current_user_id uuid
+)
+returns setof content.orders
+language plpgsql
+as $$
+begin
+    return query
+    select *
+    from content.orders
+    where is_deleted = false
+      and app_user_id = p_current_user_id;
+exception
+    when others then
+        raise exception 'get_own_app_orders: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own 1
+-- -------------------------------
+create or replace function content.get_own_app_order_by_uuid(
+    p_current_user_id uuid,
+    p_order_id        uuid
+)
+returns content.orders
+language plpgsql
+as $$
+declare
+    v_row content.orders;
+begin
+    select *
+    into v_row
+    from content.orders
+    where id = p_order_id
+      and app_user_id = p_current_user_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_order_by_uuid: order not found or not owned, id = %, user_id = %',
+            p_order_id, p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return v_row;
+exception
+    when others then
+        raise exception 'get_own_app_order_by_uuid: %', sqlerrm
+            using detail  = format('order_id = %L, current_user_id = %L',
+                                   p_order_id, p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- update
+-- -------------------------------
 create or replace function content.update_app_order_by_uuid(
     p_id              uuid,
     p_order_date      date,
@@ -2369,6 +2076,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get delte
+-- -------------------------------
 create or replace function content.delete_app_order_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
 begin
@@ -2380,6 +2091,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get restore
+-- -------------------------------
 create or replace function content.restore_app_order_by_uuid(p_id uuid)
 returns uuid language plpgsql as $$
 begin
@@ -2510,6 +2225,13 @@ create table content.request_status_histories (
 create index idx_app_request_status_history_id_hash
     on content.request_status_histories using hash (id);
 
+create index if not exists idx_app_request_status_history_request_id_hash
+    on content.request_status_histories using hash (app_request_id);
+
+
+-- -------------------------------
+-- create
+-- -------------------------------
 create or replace function content.create_app_request_status_history(
     p_app_status_id  uuid,
     p_app_request_id uuid
@@ -2533,6 +2255,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get many
+-- -------------------------------
 create or replace function content.get_app_request_status_histories()
 returns setof content.request_status_histories language plpgsql as $$
 begin
@@ -2546,6 +2272,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get 1
+-- -------------------------------
 create or replace function content.get_app_request_status_history_by_uuid(p_id uuid)
 returns content.request_status_histories language plpgsql as $$
 declare v_row content.request_status_histories;
@@ -2560,6 +2290,99 @@ exception
     when others then
         raise exception 'get_app_request_status_history_by_uuid: %', sqlerrm
             using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own many
+-- -------------------------------
+create or replace function content.get_own_app_request_status_histories(
+    p_current_user_id uuid
+)
+returns setof content.request_status_histories
+language plpgsql
+as $$
+begin
+    return query
+    select rsh.*
+    from content.request_status_histories rsh
+    join content.requests r
+      on rsh.app_request_id = r.id
+    where r.is_deleted = false
+      and rsh.is_deleted = false
+      and r.app_user_id = p_current_user_id
+    order by rsh.created_at desc;
+exception
+    when others then
+        raise exception 'get_own_app_request_status_histories: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own 1
+-- -------------------------------
+create or replace function content.get_own_app_requests(
+    p_current_user_id uuid
+)
+returns setof content.requests
+language plpgsql
+as $$
+begin
+    return query
+    select *
+    from content.requests
+    where is_deleted = false
+      and app_user_id = p_current_user_id;
+exception
+    when others then
+        raise exception 'get_own_app_requests: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+create or replace function content.get_own_app_request_status_histories_by_request(
+    p_current_user_id uuid,
+    p_request_id      uuid
+)
+returns setof content.request_status_histories
+language plpgsql
+as $$
+begin
+    -- проверяем, что заявка принадлежит пользователю и не удалена
+    if not util.is_record_active('content.requests', p_request_id) then
+        raise exception 'get_own_app_request_status_histories_by_request: request not found or deleted, id = %',
+            p_request_id
+            using errcode = 'no_data_found';
+    end if;
+
+    if not exists (
+        select 1
+        from content.requests r
+        where r.id = p_request_id
+          and r.app_user_id = p_current_user_id
+          and r.is_deleted = false
+    ) then
+        raise exception 'get_own_app_request_status_histories_by_request: request does not belong to user, id = %, user_id = %',
+            p_request_id, p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return query
+    select rsh.*
+    from content.request_status_histories rsh
+    where rsh.app_request_id = p_request_id
+      and rsh.is_deleted = false
+    order by rsh.created_at desc;
+exception
+    when others then
+        raise exception 'get_own_app_request_status_histories_by_request: %', sqlerrm
+            using detail  = format('request_id = %L, current_user_id = %L',
+                                   p_request_id, p_current_user_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -2580,6 +2403,14 @@ create table content.order_status_histories (
 create index idx_app_order_status_history_id_hash
     on content.order_status_histories using hash (id);
 
+
+create index if not exists idx_app_order_status_history_order_id_hash
+    on content.order_status_histories using hash (app_order_id);
+
+
+-- -------------------------------
+-- create
+-- -------------------------------
 create or replace function content.create_app_order_status_history(
     p_app_status_id uuid,
     p_app_order_id  uuid
@@ -2603,6 +2434,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get many
+-- -------------------------------
 create or replace function content.get_app_order_status_histories()
 returns setof content.order_status_histories language plpgsql as $$
 begin
@@ -2616,6 +2451,10 @@ exception
 end;
 $$;
 
+
+-- -------------------------------
+-- get 1
+-- -------------------------------
 create or replace function content.get_app_order_status_history_by_uuid(p_id uuid)
 returns content.order_status_histories language plpgsql as $$
 declare v_row content.order_status_histories;
@@ -2630,6 +2469,80 @@ exception
     when others then
         raise exception 'get_app_order_status_history_by_uuid: %', sqlerrm
             using detail = format('id = %L', p_id), errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own many
+-- -------------------------------
+create or replace function content.get_own_app_order_status_histories(
+    p_current_user_id uuid
+)
+returns setof content.order_status_histories
+language plpgsql
+as $$
+begin
+    return query
+    select osh.*
+    from content.order_status_histories osh
+    join content.orders o
+      on osh.app_order_id = o.id
+    where o.is_deleted = false
+      and osh.is_deleted = false
+      and o.app_user_id = p_current_user_id
+    order by osh.created_at desc;
+exception
+    when others then
+        raise exception 'get_own_app_order_status_histories: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
+-- get own 1
+-- -------------------------------
+create or replace function content.get_own_app_order_status_histories_by_order(
+    p_current_user_id uuid,
+    p_order_id        uuid
+)
+returns setof content.order_status_histories
+language plpgsql
+as $$
+begin
+    -- проверяем, что заказ активен
+    if not util.is_record_active('content.orders', p_order_id) then
+        raise exception 'get_own_app_order_status_histories_by_order: order not found or deleted, id = %',
+            p_order_id
+            using errcode = 'no_data_found';
+    end if;
+
+    if not exists (
+        select 1
+        from content.orders o
+        where o.id = p_order_id
+          and o.app_user_id = p_current_user_id
+          and o.is_deleted = false
+    ) then
+        raise exception 'get_own_app_order_status_histories_by_order: order does not belong to user, id = %, user_id = %',
+            p_order_id, p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return query
+    select osh.*
+    from content.order_status_histories osh
+    where osh.app_order_id = p_order_id
+      and osh.is_deleted = false
+    order by osh.created_at desc;
+exception
+    when others then
+        raise exception 'get_own_app_order_status_histories_by_order: %', sqlerrm
+            using detail  = format('order_id = %L, current_user_id = %L',
+                                   p_order_id, p_current_user_id),
+                  errcode = sqlstate;
 end;
 $$;
 
@@ -2722,22 +2635,11 @@ select audit.attach_dml_trigger('content', 'statuses');
 select audit.attach_dml_trigger('content', 'request_status_histories');
 select audit.attach_dml_trigger('content', 'order_status_histories');
 
--- junction
-select audit.attach_dml_trigger('junction', 'user_profile_cars');
-select audit.attach_dml_trigger('junction', 'profile_filter_brands');
-select audit.attach_dml_trigger('junction', 'profile_filter_drive_types');
-select audit.attach_dml_trigger('junction', 'profile_filter_transmission_types');
-select audit.attach_dml_trigger('junction', 'profile_filter_usage_types');
-select audit.attach_dml_trigger('junction', 'profile_filter_capacities');
-
 
 -- ─── права на audit ─────────────────────────────────────────
 -- [note] прямой SELECT на audit.dml_logs — только admin (выдан выше в TABLE-LEVEL GRANTS)
 -- [note] роли не имеют прямого доступа к audit.dml_logs — только через security definer триггер
 -- [note] attach_dml_trigger вызывается при инициализации, не нужен ролям приложения
-
-
-
 
 
 
@@ -2819,17 +2721,14 @@ grant connect on database postgres
 -- ============================================================
 -- SCHEMA-LEVEL GRANTS
 -- ============================================================
--- [note] USAGE on schema позволяет "видеть" объекты схемы по имени,
---        но НЕ даёт SELECT на таблицы — это отдельный grant.
---        Поэтому здесь выдаём USAGE всем, а SELECT — строго по матрице.
-grant usage on schema app, profile, content, junction, util, audit
+-- USAGE даёт видеть объекты схемы, но не даёт SELECT на таблицы
+grant usage on schema app, profile, content, util, audit
     to role_guest, role_user, role_manager, role_admin;
 
 
 -- ============================================================
 -- UTIL FUNCTIONS
 -- ============================================================
--- [note] util.set_entity_lifecycle доступна только тем, кто может мутировать данные
 grant execute on function util.sanitize_text(text, text)
     to role_guest, role_user, role_manager, role_admin;
 
@@ -2839,20 +2738,22 @@ grant execute on function util.is_record_active(text, uuid)
 grant execute on function util.validate_exists_by_id(text, uuid)
     to role_guest, role_user, role_manager, role_admin;
 
+-- soft-delete только для ролей, которые вообще могут мутировать данные
 grant execute on function util.set_entity_lifecycle(text, uuid, boolean)
     to role_user, role_manager, role_admin;
 
 
 -- ============================================================
--- FUNCTION-LEVEL GRANTS (CRUD по матрице)
+-- FUNCTION-LEVEL GRANTS
 -- ============================================================
 
 -- ── app.roles ────────────────────────────────────────────────
--- matrix: guest=—, user=—, manager=—, admin=R/C/U/D
+-- guest=–, user=–, manager=R1,RM, admin=C,R1,RM,U,D
 grant execute on function app.get_app_roles()
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function app.get_app_role_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 grant execute on function app.create_app_role(varchar)
     to role_admin;
 grant execute on function app.update_app_role_by_uuid(uuid, varchar)
@@ -2862,306 +2763,289 @@ grant execute on function app.delete_app_role_by_uuid(uuid)
 grant execute on function app.restore_app_role_by_uuid(uuid)
     to role_admin;
 
+
 -- ── profile.user_profiles ───────────────────────────────────
--- matrix: guest=—, user=R/C/U, manager=R/C/U, admin=R/C/U/D
+-- guest=–, user=R1 (свой профиль), manager=R1,RM, admin=C,R1,RM,U,D
 grant execute on function profile.get_app_user_profiles()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function profile.get_app_user_profile_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
+
 grant execute on function profile.create_app_user_profile(varchar, uuid)
-    to role_user, role_manager, role_admin;
+    to role_admin;
 grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid)
-    to role_user, role_manager, role_admin;
+    to role_admin;
 grant execute on function profile.delete_app_user_profile_by_uuid(uuid)
     to role_admin;
 grant execute on function profile.restore_app_user_profile_by_uuid(uuid)
     to role_admin;
 
+-- «свой профиль»
+grant execute on function profile.get_own_app_user_profile(uuid)
+    to role_user, role_manager, role_admin;
+
+
 -- ── app.users ────────────────────────────────────────────────
--- matrix: guest=—, user=R/C/U, manager=R/C/U, admin=R/C/U/D
+-- guest=–, user=R1 (свой аккаунт), manager=–, admin=C,R1,RM,U,D
 grant execute on function app.get_app_users()
-    to role_user, role_manager, role_admin;
+    to role_admin;
 grant execute on function app.get_app_user_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_admin;
+
 grant execute on function app.create_app_user(varchar, varchar, uuid)
-    to role_user, role_manager, role_admin;
+    to role_admin;
 grant execute on function app.update_app_user_by_uuid(uuid, varchar, varchar, uuid)
-    to role_user, role_manager, role_admin;
+    to role_admin;
 grant execute on function app.delete_app_user_by_uuid(uuid)
     to role_admin;
 grant execute on function app.restore_app_user_by_uuid(uuid)
     to role_admin;
 
+-- «свой пользователь»
+grant execute on function app.get_own_app_user(uuid)
+    to role_user;
+
+
 -- ── content.brands ───────────────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_brands()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_brand_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_brand(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_brand_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_brand_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_brand_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.drive_types ──────────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_drive_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_drive_type_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_drive_type(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_drive_type_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_drive_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_drive_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.transmission_types ───────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_transmission_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_transmission_type_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_transmission_type(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_transmission_type_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_transmission_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_transmission_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.usage_types ──────────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_usage_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_usage_type_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_usage_type(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_usage_type_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_usage_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_usage_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.capacity_types ───────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_capacity_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_capacity_type_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_capacity_type(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_capacity_type_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_capacity_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_capacity_type_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.capacities ───────────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_capacities()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_capacity_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_capacity(int, uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_capacity_by_uuid(uuid, int, uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_capacity_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_capacity_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.cars ─────────────────────────────────────────────
--- matrix: guest=R, user=R, manager=R, admin=R/C/U/D
+-- guest/user=RM,R1, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_cars()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_car_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
+
 grant execute on function content.create_car(
     varchar, numeric, date, varchar, text,
     uuid, uuid, uuid, uuid, uuid
-) to role_admin;
+) to role_manager, role_admin;
+
 grant execute on function content.update_car_by_uuid(
     uuid, varchar, numeric, date, varchar, text,
     uuid, uuid, uuid, uuid, uuid
-) to role_admin;
+) to role_manager, role_admin;
+
 grant execute on function content.delete_car_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_car_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 
--- ── junction.user_profile_cars ───────────────────────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_app_user_profile_cars()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_app_user_profile_car_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_app_user_profile_car(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_app_user_profile_car_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_app_user_profile_car_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-
--- ── junction.profile_filter_brands ──────────────────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_profile_filter_brands()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_brand_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_brand(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_brand_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_brand_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-
--- ── junction.profile_filter_drive_types ─────────────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_profile_filter_drive_types()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_drive_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_drive_type(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_drive_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_drive_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-
--- ── junction.profile_filter_transmission_types ──────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_profile_filter_transmission_types()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_transmission_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_transmission_type(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_transmission_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_transmission_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-
--- ── junction.profile_filter_usage_types ─────────────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_profile_filter_usage_types()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_usage_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_usage_type(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_usage_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_usage_type_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-
--- ── junction.profile_filter_capacities ──────────────────────
--- matrix: guest=—, user=R/C/D, manager=R/C/D, admin=R/C/D
-grant execute on function junction.get_profile_filter_capacities()
-    to role_user, role_manager, role_admin;
-grant execute on function junction.get_profile_filter_capacity_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.create_profile_filter_capacity(uuid, uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.delete_profile_filter_capacity_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
-grant execute on function junction.restore_profile_filter_capacity_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
 
 -- ── content.requests ─────────────────────────────────────────
--- matrix: guest=—, user=R/C, manager=R/C/U/D, admin=R/C/U/D
+-- guest=–, user=C,R1,RM,U,D (свои), manager=C,R1,RM,U,D, admin=R1,RM
 grant execute on function content.get_app_requests()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function content.get_app_request_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
+
 grant execute on function content.create_app_request(uuid, uuid, text)
-    to role_user, role_manager, role_admin;
+    to role_user, role_manager;
+
 grant execute on function content.update_app_request_by_uuid(uuid, uuid, uuid, text)
-    to role_manager, role_admin;
+    to role_manager;
+
 grant execute on function content.delete_app_request_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_manager;
 grant execute on function content.restore_app_request_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_manager;
+
+-- «свои заявки»
+grant execute on function content.get_own_app_requests(uuid)
+    to role_user;
+grant execute on function content.get_own_app_request_by_uuid(uuid, uuid)
+    to role_user;
+
 
 -- ── content.orders ───────────────────────────────────────────
--- matrix: guest=—, user=R, manager=R/C/U, admin=R/C/U/D
+-- guest=–, user=R1,RM (свои), manager=C,R1,RM,D, admin=R1,RM
 grant execute on function content.get_app_orders()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function content.get_app_order_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
+
 grant execute on function content.create_app_order(
     date, int, numeric, numeric, uuid, uuid, uuid, text
-) to role_manager, role_admin;
+) to role_manager;
+
 grant execute on function content.update_app_order_by_uuid(
     uuid, date, int, numeric, numeric, uuid, uuid, uuid, text
-) to role_manager, role_admin;
+) to role_manager;
+
 grant execute on function content.delete_app_order_by_uuid(uuid)
-    to role_admin;
+    to role_manager;
 grant execute on function content.restore_app_order_by_uuid(uuid)
-    to role_admin;
+    to role_manager;
+
+-- «свои договоры»
+grant execute on function content.get_own_app_orders(uuid)
+    to role_user;
+grant execute on function content.get_own_app_order_by_uuid(uuid, uuid)
+    to role_user;
+
 
 -- ── content.statuses ─────────────────────────────────────────
--- matrix: guest=—, user=—, manager=R, admin=R/C/U/D
+-- guest=–, user=RM, manager/admin=C,R1,RM,U,D
 grant execute on function content.get_app_statuses()
-    to role_manager, role_admin;
+    to role_user, role_manager, role_admin;
 grant execute on function content.get_app_status_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_user, role_manager, role_admin;
+
 grant execute on function content.create_app_status(varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.update_app_status_by_uuid(uuid, varchar)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.delete_app_status_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function content.restore_app_status_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
+
 
 -- ── content.request_status_histories ────────────────────────
--- matrix: guest=—, user=R, manager=R/C, admin=R/C  (append-only)
+-- guest=–, user=R1,RM (по своим), manager/admin=R1,RM + C, без U,D
 grant execute on function content.get_app_request_status_histories()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function content.get_app_request_status_history_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
+
 grant execute on function content.create_app_request_status_history(uuid, uuid)
     to role_manager, role_admin;
 
+-- свои истории по заявкам
+grant execute on function content.get_own_app_request_status_histories(uuid)
+    to role_user;
+grant execute on function content.get_own_app_request_status_histories_by_request(uuid, uuid)
+    to role_user;
+
+
 -- ── content.order_status_histories ──────────────────────────
--- matrix: guest=—, user=R, manager=R/C, admin=R/C  (append-only)
+-- guest=–, user=R1,RM (по своим), manager/admin=R1,RM + C, без U,D
 grant execute on function content.get_app_order_status_histories()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function content.get_app_order_status_history_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
+
 grant execute on function content.create_app_order_status_history(uuid, uuid)
     to role_manager, role_admin;
 
+-- свои истории по договорам
+grant execute on function content.get_own_app_order_status_histories(uuid)
+    to role_user;
+grant execute on function content.get_own_app_order_status_histories_by_order(uuid, uuid)
+    to role_user;
+
+
+-- ── audit.dml_logs ──────────────────────────────────────────
+-- журнал аудита читает только admin
+-- (через прямой SELECT, либо через обёртку, если добавишь функцию)
+grant select on audit.dml_logs
+    to role_admin;
+
 
 -- ============================================================
--- TABLE-LEVEL GRANTS (строго по матрице)
+-- TABLE-LEVEL GRANTS
 -- ============================================================
--- [fix] В оригинале GRANT SELECT выдавался на все таблицы всем четырём ролям,
---       включая role_guest — что давало гостю прямой SELECT на app.users,
---       profile.user_profiles и другие закрытые таблицы.
---
---       Правило: таблицы, закрытые для guest (и для user), должны быть
---       явно исключены из соответствующих GRANT.
---
---       Доступ через прямой SQL к таблицам нужен утилитным функциям
---       (util.is_record_active, security definer триггерам).
---       Прикладные роли используют только функции — поэтому таблично-уровневые
---       права выдаём ровно в том объёме, который нужен для работы функций.
 
 -- ── SELECT ───────────────────────────────────────────────────
-
 -- guest: только справочники и автомобили
 grant select on
     content.brands,
@@ -3173,8 +3057,7 @@ grant select on
     content.cars
 to role_guest;
 
--- user/manager/admin: все таблицы кроме audit (admin получит отдельно)
--- [note] app.roles — только admin, потому матрица: guest=—, user=—, manager=—, admin=R
+-- user: таблицы, с которыми он работает (профиль, свой user, свои заявки/договоры через функции)
 grant select on
     profile.user_profiles,
     app.users,
@@ -3185,19 +3068,14 @@ grant select on
     content.capacity_types,
     content.capacities,
     content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
     content.requests,
     content.orders,
+    content.statuses,
     content.request_status_histories,
     content.order_status_histories
 to role_user;
 
--- manager видит всё что user + content.statuses
+-- manager: всё как у user + управление статусами
 grant select on
     profile.user_profiles,
     app.users,
@@ -3208,12 +3086,6 @@ grant select on
     content.capacity_types,
     content.capacities,
     content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
     content.requests,
     content.orders,
     content.statuses,
@@ -3221,7 +3093,7 @@ grant select on
     content.order_status_histories
 to role_manager;
 
--- admin — полный доступ ко всем таблицам включая app.roles и audit
+-- admin: полный SELECT
 grant select on
     app.roles,
     profile.user_profiles,
@@ -3233,12 +3105,6 @@ grant select on
     content.capacity_types,
     content.capacities,
     content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
     content.requests,
     content.orders,
     content.statuses,
@@ -3247,13 +3113,17 @@ grant select on
     audit.dml_logs
 to role_admin;
 
--- ── INSERT ───────────────────────────────────────────────────
--- [note] guest не может ничего создавать я решил что может только пользоватлея
 
+-- ── INSERT ───────────────────────────────────────────────────
+-- guest не создаёт ничего
+
+-- user: может создавать свои аккаунты и заявки
 grant insert on
-   app.users
+    app.users,
+    content.requests
 to role_user;
 
+-- manager: создаёт справочники, авто, заявки, заказы, статусы, истории
 grant insert on
     profile.user_profiles,
     app.users,
@@ -3264,26 +3134,38 @@ grant insert on
     content.capacity_types,
     content.capacities,
     content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
     content.requests,
     content.orders,
     content.statuses,
     content.request_status_histories,
     content.order_status_histories
-to role_user, role_manager, role_admin;
+to role_manager;
 
--- app.roles — только admin
-grant insert on app.roles to role_admin;
+-- admin: дополнительно roles
+grant insert on
+    app.roles,
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    content.requests,
+    content.orders,
+    content.statuses,
+    content.request_status_histories,
+    content.order_status_histories
+to role_admin;
+
 
 -- ── UPDATE ───────────────────────────────────────────────────
--- [note] is_deleted обновляется через util.set_entity_lifecycle,
---        поэтому UPDATE нужен ровно на тех таблицах, где есть soft-delete.
---        Таблицы-истории (append-only) — без UPDATE.
+-- истории (request/order_status_histories) и dml_logs без UPDATE
+-- orders обновляют только manager/admin на табличном уровне,
+-- но бизнес-ограничение «не менять договор» можно держать во view/API.
+
 grant update on
     profile.user_profiles,
     app.users,
@@ -3294,20 +3176,26 @@ grant update on
     content.capacity_types,
     content.capacities,
     content.cars,
-    junction.user_profile_cars,
-    junction.profile_filter_brands,
-    junction.profile_filter_drive_types,
-    junction.profile_filter_transmission_types,
-    junction.profile_filter_usage_types,
-    junction.profile_filter_capacities,
     content.requests,
     content.orders,
     content.statuses
-to role_user, role_manager, role_admin;
+to role_manager;
 
--- app.roles — только admin
-grant update on app.roles to role_admin;
-
+grant update on
+    app.roles,
+    profile.user_profiles,
+    app.users,
+    content.brands,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
+    content.capacities,
+    content.cars,
+    content.requests,
+    content.orders,
+    content.statuses
+to role_admin;
 
 
 -- ============================================================
@@ -3319,15 +3207,15 @@ grant update on app.roles to role_admin;
 
 -- grant connect on database postgres to repl_user;
 
--- grant usage on schema app, profile, content, junction, util, audit to repl_user;
--- grant select on all tables in schema app, profile, content, junction, util, audit to repl_user;
+-- grant usage on schema app, profile, content, util, audit to repl_user;
+-- grant select on all tables in schema app, profile, content, util, audit to repl_user;
 
--- alter default privileges in schema app, profile, content, junction, util, audit
+-- alter default privileges in schema app, profile, content, util, audit
 --     grant select on tables to repl_user;
 
 
 -- create publication postgres_pub_all
---     for tables in schema app, profile, content, junction, util, audit;
+--     for tables in schema app, profile, content, util, audit;
 
 
 -- show wal_level;
@@ -3455,14 +3343,4 @@ grant update on app.roles to role_admin;
 
 -- select * from content.cars;
 -- call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
-
-
-
-
-
-
-
-
-
-
 
