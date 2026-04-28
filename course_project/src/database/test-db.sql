@@ -27,14 +27,14 @@ begin
     -- статусы
     select id into v_app_status_new_id
     from content.statuses
-    where name = 'REQUEST_NEW';
+    where name = 'REQUEST_PENDING';
 
     select id into v_app_status_order_created_id
     from content.statuses
-    where name = 'ORDER_CREATED';
+    where name = 'ORDER_PENDING';
 
     if v_app_status_new_id is null or v_app_status_order_created_id is null then
-        raise exception 'Не найдены статусы REQUEST_NEW или ORDER_CREATED в content.statuses';
+        raise exception 'Не найдены статусы REQUEST_PENDING или ORDER_PENDING в content.statuses';
     end if;
 
     -- основной цикл

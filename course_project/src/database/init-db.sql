@@ -2719,9 +2719,8 @@ grant connect on database postgres
 
 
 -- ============================================================
--- SCHEMA-LEVEL GRANTS
+-- SCHEMA-LEVEL USAGE
 -- ============================================================
--- USAGE даёт видеть объекты схемы, но не даёт SELECT на таблицы
 grant usage on schema app, profile, content, util, audit
     to role_guest, role_user, role_manager, role_admin;
 
@@ -2738,17 +2737,16 @@ grant execute on function util.is_record_active(text, uuid)
 grant execute on function util.validate_exists_by_id(text, uuid)
     to role_guest, role_user, role_manager, role_admin;
 
--- soft-delete только для ролей, которые вообще могут мутировать данные
+-- мягкое удаление / восстановление — только тем, кто вообще может менять данные
 grant execute on function util.set_entity_lifecycle(text, uuid, boolean)
     to role_user, role_manager, role_admin;
 
 
 -- ============================================================
--- FUNCTION-LEVEL GRANTS
+-- FUNCTION-LEVEL GRANTS ПО МАТРИЦЕ
 -- ============================================================
 
--- ── app.roles ────────────────────────────────────────────────
--- guest=–, user=–, manager=R1,RM, admin=C,R1,RM,U,D
+-- ── app.roles (guest –, user –, manager=R, admin=C,R,U,D) ─────
 grant execute on function app.get_app_roles()
     to role_manager, role_admin;
 grant execute on function app.get_app_role_by_uuid(uuid)
@@ -2764,50 +2762,52 @@ grant execute on function app.restore_app_role_by_uuid(uuid)
     to role_admin;
 
 
--- ── profile.user_profiles ───────────────────────────────────
--- guest=–, user=R1 (свой профиль), manager=R1,RM, admin=C,R1,RM,U,D
+-- ── profile.userprofiles (guest –, user=RO,U(свой), manager=R, admin=C,R,U,D) ──
+-- менеджер и админ видят все профили
 grant execute on function profile.get_app_user_profiles()
     to role_manager, role_admin;
 grant execute on function profile.get_app_user_profile_by_uuid(uuid)
     to role_manager, role_admin;
 
-grant execute on function profile.create_app_user_profile(varchar, uuid)
+-- создание / правка / удаление профилей: только admin
+grant execute on function profile.create_app_user_profile(varchar)
     to role_admin;
-grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid)
+grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar)
     to role_admin;
 grant execute on function profile.delete_app_user_profile_by_uuid(uuid)
     to role_admin;
 grant execute on function profile.restore_app_user_profile_by_uuid(uuid)
     to role_admin;
 
--- «свой профиль»
+-- «свой профиль»: user может читать (и дальше апдейтить через API), manager/admin тоже
 grant execute on function profile.get_own_app_user_profile(uuid)
     to role_user, role_manager, role_admin;
 
 
--- ── app.users ────────────────────────────────────────────────
--- guest=–, user=R1 (свой аккаунт), manager=–, admin=C,R1,RM,U,D
+-- ── app.users (guest=C, user=RO(свой), manager=R, admin=C,R,U,D) ──────────────
+-- manager/admin читают пользователей
 grant execute on function app.get_app_users()
-    to role_admin;
+    to role_manager, role_admin;
 grant execute on function app.get_app_user_by_uuid(uuid)
-    to role_admin;
+    to role_manager, role_admin;
 
-grant execute on function app.create_app_user(varchar, varchar, uuid)
-    to role_admin;
-grant execute on function app.update_app_user_by_uuid(uuid, varchar, varchar, uuid)
+-- создание пользователей: гость создаёт себя, admin может создавать любых
+grant execute on function app.create_app_user(varchar)
+    to role_guest, role_admin;
+
+grant execute on function app.update_app_user_by_uuid(uuid, varchar)
     to role_admin;
 grant execute on function app.delete_app_user_by_uuid(uuid)
     to role_admin;
 grant execute on function app.restore_app_user_by_uuid(uuid)
     to role_admin;
 
--- «свой пользователь»
+-- «свой user» (O-операции): user читает себя
 grant execute on function app.get_own_app_user(uuid)
     to role_user;
 
 
--- ── content.brands ───────────────────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.brands (guest R, user R, manager/admin C,R,U,D) ───────────────────
 grant execute on function content.get_brands()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_brand_by_uuid(uuid)
@@ -2823,8 +2823,7 @@ grant execute on function content.restore_brand_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.drive_types ──────────────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.drivetypes (guest R, user R, manager/admin C,R,U,D) ───────────────
 grant execute on function content.get_drive_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_drive_type_by_uuid(uuid)
@@ -2840,8 +2839,7 @@ grant execute on function content.restore_drive_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.transmission_types ───────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.transmissiontypes (guest R, user R, manager/admin C,R,U,D) ────────
 grant execute on function content.get_transmission_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_transmission_type_by_uuid(uuid)
@@ -2857,8 +2855,7 @@ grant execute on function content.restore_transmission_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.usage_types ──────────────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.usagetypes (guest R, user R, manager/admin C,R,U,D) ───────────────
 grant execute on function content.get_usage_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_usage_type_by_uuid(uuid)
@@ -2874,8 +2871,7 @@ grant execute on function content.restore_usage_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.capacity_types ───────────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.capacitytypes (guest R, user R, manager/admin C,R,U,D) ────────────
 grant execute on function content.get_capacity_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_capacity_type_by_uuid(uuid)
@@ -2891,8 +2887,7 @@ grant execute on function content.restore_capacity_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.capacities ───────────────────────────────────────
--- guest=RM,R1, user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.capacities (guest R, user R, manager/admin C,R,U,D) ───────────────
 grant execute on function content.get_capacities()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_capacity_by_uuid(uuid)
@@ -2908,137 +2903,115 @@ grant execute on function content.restore_capacity_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.cars ─────────────────────────────────────────────
--- guest/user=RM,R1, manager/admin=C,R1,RM,U,D
+-- ── content.cars (guest R, user R, manager R, admin C,R,U,D) ──────────────────
 grant execute on function content.get_cars()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_car_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
 
-grant execute on function content.create_car(
-    varchar, numeric, date, varchar, text,
-    uuid, uuid, uuid, uuid, uuid
-) to role_manager, role_admin;
-
-grant execute on function content.update_car_by_uuid(
-    uuid, varchar, numeric, date, varchar, text,
-    uuid, uuid, uuid, uuid, uuid
-) to role_manager, role_admin;
-
+-- создавать/менять/удалять машины может только admin (manager по матрице только R)
+grant execute on function content.create_car(varchar)
+    to role_admin;
+grant execute on function content.update_car_by_uuid(uuid, varchar)
+    to role_admin;
 grant execute on function content.delete_car_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_admin;
 grant execute on function content.restore_car_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_admin;
 
 
--- ── content.requests ─────────────────────────────────────────
--- guest=–, user=C,R1,RM,U,D (свои), manager=C,R1,RM,U,D, admin=R1,RM
+-- ── content.requests (guest –, user=C,RMO(свои), manager R, admin R) ──────────
+-- глобальные R для manager/admin
 grant execute on function content.get_app_requests()
     to role_manager, role_admin;
 grant execute on function content.get_app_request_by_uuid(uuid)
     to role_manager, role_admin;
 
+-- создание заявок: только user (для себя)
 grant execute on function content.create_app_request(uuid, uuid, text)
-    to role_user, role_manager;
+    to role_user;
 
-grant execute on function content.update_app_request_by_uuid(uuid, uuid, uuid, text)
-    to role_manager;
+-- глобальных U/D по матрице нет => update/delete/restore функций не выдаём никому
 
-grant execute on function content.delete_app_request_by_uuid(uuid)
-    to role_manager;
-grant execute on function content.restore_app_request_by_uuid(uuid)
-    to role_manager;
-
--- «свои заявки»
+-- O-функции для своих заявок: user читает свои и их истории
 grant execute on function content.get_own_app_requests(uuid)
     to role_user;
 grant execute on function content.get_own_app_request_by_uuid(uuid, uuid)
     to role_user;
 
 
--- ── content.orders ───────────────────────────────────────────
--- guest=–, user=R1,RM (свои), manager=C,R1,RM,D, admin=R1,RM
+-- ── content.orders (guest –, user=RMO(свои), manager C,R, admin R) ────────────
+-- глобальные заказы видят manager и admin (R)
 grant execute on function content.get_app_orders()
     to role_manager, role_admin;
 grant execute on function content.get_app_order_by_uuid(uuid)
     to role_manager, role_admin;
 
-grant execute on function content.create_app_order(
-    date, int, numeric, numeric, uuid, uuid, uuid, text
-) to role_manager;
-
-grant execute on function content.update_app_order_by_uuid(
-    uuid, date, int, numeric, numeric, uuid, uuid, uuid, text
-) to role_manager;
-
-grant execute on function content.delete_app_order_by_uuid(uuid)
-    to role_manager;
-grant execute on function content.restore_app_order_by_uuid(uuid)
+-- создание заказов: только manager (C у manager, admin по матрице не C)
+grant execute on function content.create_app_order(date, int, numeric)
     to role_manager;
 
--- «свои договоры»
+-- U/D по матрице нет ни у кого => функции update/delete/restore не выдаём
+-- (если нужны бизнес-операции смены, держать через статусы/soft-delete)
+
+-- O-функции: свои заказы видит user
 grant execute on function content.get_own_app_orders(uuid)
     to role_user;
 grant execute on function content.get_own_app_order_by_uuid(uuid, uuid)
     to role_user;
 
 
--- ── content.statuses ─────────────────────────────────────────
--- guest=–, user=RM, manager/admin=C,R1,RM,U,D
+-- ── content.statuses (guest –, user –, manager C,R, admin C,R,U,D) ────────────
 grant execute on function content.get_app_statuses()
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 grant execute on function content.get_app_status_by_uuid(uuid)
-    to role_user, role_manager, role_admin;
+    to role_manager, role_admin;
 
 grant execute on function content.create_app_status(varchar)
     to role_manager, role_admin;
 grant execute on function content.update_app_status_by_uuid(uuid, varchar)
-    to role_manager, role_admin;
+    to role_admin;         -- U есть только у admin
 grant execute on function content.delete_app_status_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_admin;         -- D есть только у admin
 grant execute on function content.restore_app_status_by_uuid(uuid)
-    to role_manager, role_admin;
+    to role_admin;
 
 
--- ── content.request_status_histories ────────────────────────
--- guest=–, user=R1,RM (по своим), manager/admin=R1,RM + C, без U,D
+-- ── content.requeststatushistories (guest –, user C,RMO(свои), manager C,R, admin R) ──
+-- глобальные истории: manager/admin (R)
 grant execute on function content.get_app_request_status_histories()
     to role_manager, role_admin;
 grant execute on function content.get_app_request_status_history_by_uuid(uuid)
     to role_manager, role_admin;
 
+-- создание записей истории: manager (C у manager, admin по матрице только R)
 grant execute on function content.create_app_request_status_history(uuid, uuid)
-    to role_manager, role_admin;
+    to role_manager;
 
--- свои истории по заявкам
+-- свои истории заявок: user
 grant execute on function content.get_own_app_request_status_histories(uuid)
     to role_user;
 grant execute on function content.get_own_app_request_status_histories_by_request(uuid, uuid)
     to role_user;
 
 
--- ── content.order_status_histories ──────────────────────────
--- guest=–, user=R1,RM (по своим), manager/admin=R1,RM + C, без U,D
+-- ── content.orderstatushistories (guest –, user C,RMO(свои), manager C,R, admin R) ────
 grant execute on function content.get_app_order_status_histories()
     to role_manager, role_admin;
 grant execute on function content.get_app_order_status_history_by_uuid(uuid)
     to role_manager, role_admin;
 
 grant execute on function content.create_app_order_status_history(uuid, uuid)
-    to role_manager, role_admin;
+    to role_manager;
 
--- свои истории по договорам
 grant execute on function content.get_own_app_order_status_histories(uuid)
     to role_user;
 grant execute on function content.get_own_app_order_status_histories_by_order(uuid, uuid)
     to role_user;
 
 
--- ── audit.dml_logs ──────────────────────────────────────────
--- журнал аудита читает только admin
--- (через прямой SELECT, либо через обёртку, если добавишь функцию)
-grant select on audit.dml_logs
-    to role_admin;
+-- ── audit.dmllogs (guest –, user –, manager –, admin R) ───────────────────────
+-- читается через прямой SELECT (см. блок TABLE-LEVEL GRANTS ниже)
 
 
 -- ============================================================
@@ -3049,147 +3022,168 @@ grant select on audit.dml_logs
 -- guest: только справочники и автомобили
 grant select on
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars
 to role_guest;
 
--- user: таблицы, с которыми он работает (профиль, свой user, свои заявки/договоры через функции)
+-- user: таблицы, с которыми он работает
 grant select on
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
+    content.requeststatushistories,
+    content.orderstatushistories
 to role_user;
 
--- manager: всё как у user + управление статусами
-grant select on
-    profile.user_profiles,
-    app.users,
-    content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
-    content.capacities,
-    content.cars,
-    content.requests,
-    content.orders,
-    content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
-to role_manager;
-
--- admin: полный SELECT
+-- manager: всё как у user + роли
 grant select on
     app.roles,
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.request_status_histories,
-    content.order_status_histories,
-    audit.dml_logs
+    content.requeststatushistories,
+    content.orderstatushistories
+to role_manager;
+
+-- admin: полный SELECT + журнал аудита
+grant select on
+    app.roles,
+    profile.userprofiles,
+    app.users,
+    content.brands,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
+    content.capacities,
+    content.cars,
+    content.requests,
+    content.orders,
+    content.statuses,
+    content.requeststatushistories,
+    content.orderstatushistories,
+    audit.dmllogs
 to role_admin;
 
 
 -- ── INSERT ───────────────────────────────────────────────────
--- guest не создаёт ничего
+-- guest ничего не вставляет напрямую
 
--- user: может создавать свои аккаунты и заявки
+-- user: создаёт app.users и content.requests
 grant insert on
     app.users,
     content.requests
 to role_user;
 
--- manager: создаёт справочники, авто, заявки, заказы, статусы, истории
+-- manager: создаёт справочники, авто, заказы, статусы, истории
 grant insert on
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
-    content.requests,
     content.orders,
     content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
+    content.requeststatushistories,
+    content.orderstatushistories
 to role_manager;
 
--- admin: дополнительно roles
+-- admin: то же + roles, requests
 grant insert on
     app.roles,
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.request_status_histories,
-    content.order_status_histories
+    content.requeststatushistories,
+    content.orderstatushistories
 to role_admin;
 
 
 -- ── UPDATE ───────────────────────────────────────────────────
--- истории (request/order_status_histories) и dml_logs без UPDATE
--- orders обновляют только manager/admin на табличном уровне,
--- но бизнес-ограничение «не менять договор» можно держать во view/API.
+-- истории и dml_logs без UPDATE напрямую
 
 grant update on
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
-    content.requests,
     content.orders,
     content.statuses
 to role_manager;
 
 grant update on
     app.roles,
-    profile.user_profiles,
+    profile.userprofiles,
     app.users,
     content.brands,
-    content.drive_types,
-    content.transmission_types,
-    content.usage_types,
-    content.capacity_types,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
+    content.capacities,
+    content.cars,
+    content.orders,
+    content.statuses
+to role_admin;
+
+
+-- ── DELETE ───────────────────────────────────────────────────
+-- физический DELETE — только там, где в матрице есть D
+-- (D в матрице есть только у admin, и только на:
+--  app.roles, profile.userprofiles, app.users,
+--  content.brands, content.drivetypes, content.transmissiontypes,
+--  content.usagetypes, content.capacitytypes, content.capacities,
+--  content.cars, content.requests, content.orders, content.statuses)
+
+grant delete on
+    app.roles,
+    profile.userprofiles,
+    app.users,
+    content.brands,
+    content.drivetypes,
+    content.transmissiontypes,
+    content.usagetypes,
+    content.capacitytypes,
     content.capacities,
     content.cars,
     content.requests,
@@ -3245,102 +3239,104 @@ to role_admin;
 --     data text not null
 -- );
 
--- create or replace procedure content.export_cars_to_json()
--- language plpgsql
--- as $$
--- begin
---     truncate table util.export_buffer;
+create or replace procedure content.export_cars_to_json()
+language plpgsql
+as $$
+begin
+    truncate table util.export_buffer;
 
---     insert into util.export_buffer(data)
---     select coalesce(
---                jsonb_agg(
---                    jsonb_build_object(
---                        'id', c.id,
---                        'name', c.name,
---                        'price_of_origin', c.price_of_origin,
---                        'manufacture_date', c.manufacture_date,
---                        'country_of_origin', c.country_of_origin,
---                        'description', c.description,
---                        'is_deleted', c.is_deleted,
---                        'brand_id', c.brand_id,
---                        'drive_type_id', c.drive_type_id,
---                        'transmission_type_id', c.transmission_type_id,
---                        'usage_type_id', c.usage_type_id,
---                        'capacity_id', c.capacity_id
---                    )
---                ),
---                '[]'::jsonb
---            )::text
---     from content.cars c
---     where c.is_deleted = false;
--- end;
--- $$;
+    insert into util.export_buffer(data)
+    select coalesce(
+               jsonb_agg(
+                   jsonb_build_object(
+                       'id', c.id,
+                       'name', c.name,
+                       'price_of_origin', c.price_of_origin,
+                       'manufacture_date', c.manufacture_date,
+                       'country_of_origin', c.country_of_origin,
+                       'description', c.description,
+                       'is_deleted', c.is_deleted,
+                       'brand_id', c.brand_id,
+                       'drive_type_id', c.drive_type_id,
+                       'transmission_type_id', c.transmission_type_id,
+                       'usage_type_id', c.usage_type_id,
+                       'capacity_id', c.capacity_id
+                   )
+               ),
+               '[]'::jsonb
+           )::text
+    from content.cars c
+    where c.is_deleted = false;
+end;
+$$;
 
--- create or replace procedure content.import_cars_from_json(p_file_path text)
--- language plpgsql
--- as $$
--- begin
---     create temp table if not exists tmp_json_import (
---         data jsonb
---     ) on commit drop;
+create or replace procedure content.import_cars_from_json(p_file_path text)
+language plpgsql
+as $$
+begin
+    create temp table if not exists tmp_json_import (
+        data jsonb
+    ) on commit drop;
 
---     truncate table tmp_json_import;
+    truncate table tmp_json_import;
 
---     execute format(
---         'copy tmp_json_import(data) from %L',
---         p_file_path
---     );
+    execute format(
+        'copy tmp_json_import(data) from %L',
+        p_file_path
+    );
 
---     if not exists (select 1 from tmp_json_import) then
---         raise exception 'Файл импорта пуст или не был загружен: %', p_file_path;
---     end if;
+    if not exists (select 1 from tmp_json_import) then
+        raise exception 'Файл импорта пуст или не был загружен: %', p_file_path;
+    end if;
 
---     insert into content.cars (
---         name,
---         price_of_origin,
---         manufacture_date,
---         country_of_origin,
---         description,
---         brand_id,
---         drive_type_id,
---         transmission_type_id,
---         usage_type_id,
---         capacity_id
---     )
---     select
---         x.name,
---         x.price_of_origin,
---         x.manufacture_date,
---         x.country_of_origin,
---         x.description,
---         x.brand_id,
---         x.drive_type_id,
---         x.transmission_type_id,
---         x.usage_type_id,
---         x.capacity_id
---     from tmp_json_import t,
---          jsonb_to_recordset(t.data) as x(
---              name varchar(100),
---              price_of_origin numeric(12,2),
---              manufacture_date date,
---              country_of_origin varchar(100),
---              description text,
---              brand_id uuid,
---              drive_type_id uuid,
---              transmission_type_id uuid,
---              usage_type_id uuid,
---              capacity_id uuid
---          );
--- end;
--- $$;
+    insert into content.cars (
+        name,
+        price_of_origin,
+        manufacture_date,
+        country_of_origin,
+        description,
+        brand_id,
+        drive_type_id,
+        transmission_type_id,
+        usage_type_id,
+        capacity_id
+    )
+    select
+        x.name,
+        x.price_of_origin,
+        x.manufacture_date,
+        x.country_of_origin,
+        x.description,
+        x.brand_id,
+        x.drive_type_id,
+        x.transmission_type_id,
+        x.usage_type_id,
+        x.capacity_id
+    from tmp_json_import t,
+         jsonb_to_recordset(t.data) as x(
+             name varchar(100),
+             price_of_origin numeric(12,2),
+             manufacture_date date,
+             country_of_origin varchar(100),
+             description text,
+             brand_id uuid,
+             drive_type_id uuid,
+             transmission_type_id uuid,
+             usage_type_id uuid,
+             capacity_id uuid
+         );
+end;
+$$;
 
 
--- call content.export_cars_to_json();
--- \copy (
---     select data from util.export_buffer
--- ) to '/var/lib/postgresql/18/docker/cars.json';
--- truncate table content.cars cascade;
+call content.export_cars_to_json();
+copy (
+    select data from util.export_buffer
+) to '/var/lib/postgresql/18/docker/cars.json';
+truncate table content.cars cascade;
 
--- select * from content.cars;
--- call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
+select * from content.cars;
+call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
+
+
 

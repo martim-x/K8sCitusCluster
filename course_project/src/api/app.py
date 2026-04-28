@@ -271,6 +271,15 @@ async def get_app_user_by_uuid(request: Request, p_id: UUID):
     return await fetch_one(request, "select * from app.get_app_user_by_uuid($1)", p_id)
 
 
+@app.get("/app/get_own_app_user", tags=["app.users"])
+async def get_own_app_user(request: Request, p_current_user_id: UUID):
+    return await fetch_one(
+        request,
+        "select * from app.get_own_app_user($1)",
+        p_current_user_id,
+    )
+
+
 @app.post("/app/create_app_user", tags=["app.users"])
 async def create_app_user(
     request: Request, p_email: str, p_password: str, p_app_user_profile_id: UUID
@@ -326,6 +335,15 @@ async def get_app_user_profiles(request: Request):
 async def get_app_user_profile_by_uuid(request: Request, p_id: UUID):
     return await fetch_one(
         request, "select * from profile.get_app_user_profile_by_uuid($1)", p_id
+    )
+
+
+@app.get("/profile/get_own_app_user_profile", tags=["profile.user_profiles"])
+async def get_own_app_user_profile(request: Request, p_current_user_id: UUID):
+    return await fetch_one(
+        request,
+        "select * from profile.get_own_app_user_profile($1)",
+        p_current_user_id,
     )
 
 
@@ -736,6 +754,29 @@ async def get_app_request_by_uuid(request: Request, p_id: UUID):
     )
 
 
+@app.get("/content/get_own_app_requests", tags=["content.requests"])
+async def get_own_app_requests(request: Request, p_current_user_id: UUID):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_requests($1)",
+        p_current_user_id,
+    )
+
+
+@app.get("/content/get_own_app_request_by_uuid", tags=["content.requests"])
+async def get_own_app_request_by_uuid(
+    request: Request,
+    p_current_user_id: UUID,
+    p_request_id: UUID,
+):
+    return await fetch_one(
+        request,
+        "select * from content.get_own_app_request_by_uuid($1, $2)",
+        p_current_user_id,
+        p_request_id,
+    )
+
+
 @app.post("/content/create_app_request", tags=["content.requests"])
 async def create_app_request(
     request: Request,
@@ -807,6 +848,29 @@ async def get_app_order_by_uuid(request: Request, p_id: UUID):
         request,
         "select * from content.get_app_order_by_uuid($1)",
         p_id,
+    )
+
+
+@app.get("/content/get_own_app_orders", tags=["content.orders"])
+async def get_own_app_orders(request: Request, p_current_user_id: UUID):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_orders($1)",
+        p_current_user_id,
+    )
+
+
+@app.get("/content/get_own_app_order_by_uuid", tags=["content.orders"])
+async def get_own_app_order_by_uuid(
+    request: Request,
+    p_current_user_id: UUID,
+    p_order_id: UUID,
+):
+    return await fetch_one(
+        request,
+        "select * from content.get_own_app_order_by_uuid($1, $2)",
+        p_current_user_id,
+        p_order_id,
     )
 
 
@@ -973,6 +1037,38 @@ async def get_app_request_status_history_by_uuid(request: Request, p_id: UUID):
     )
 
 
+@app.get(
+    "/content/get_own_app_request_status_histories",
+    tags=["content.request_status_histories"],
+)
+async def get_own_app_request_status_histories(
+    request: Request,
+    p_current_user_id: UUID,
+):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_request_status_histories($1)",
+        p_current_user_id,
+    )
+
+
+@app.get(
+    "/content/get_own_app_request_status_histories_by_request",
+    tags=["content.request_status_histories"],
+)
+async def get_own_app_request_status_histories_by_request(
+    request: Request,
+    p_current_user_id: UUID,
+    p_request_id: UUID,
+):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_request_status_histories_by_request($1, $2)",
+        p_current_user_id,
+        p_request_id,
+    )
+
+
 @app.post(
     "/content/create_app_request_status_history",
     tags=["content.request_status_histories"],
@@ -1018,6 +1114,38 @@ async def get_app_order_status_history_by_uuid(request: Request, p_id: UUID):
     )
 
 
+@app.get(
+    "/content/get_own_app_order_status_histories",
+    tags=["content.order_status_histories"],
+)
+async def get_own_app_order_status_histories(
+    request: Request,
+    p_current_user_id: UUID,
+):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_order_status_histories($1)",
+        p_current_user_id,
+    )
+
+
+@app.get(
+    "/content/get_own_app_order_status_histories_by_order",
+    tags=["content.order_status_histories"],
+)
+async def get_own_app_order_status_histories_by_order(
+    request: Request,
+    p_current_user_id: UUID,
+    p_order_id: UUID,
+):
+    return await fetch_all(
+        request,
+        "select * from content.get_own_app_order_status_histories_by_order($1, $2)",
+        p_current_user_id,
+        p_order_id,
+    )
+
+
 @app.post(
     "/content/create_app_order_status_history",
     tags=["content.order_status_histories"],
@@ -1032,421 +1160,4 @@ async def create_app_order_status_history(
         "select content.create_app_order_status_history($1, $2)",
         p_app_status_id,
         p_app_order_id,
-    )
-
-
-# ============================================================
-# junction.user_profile_cars
-# ============================================================
-
-
-@app.get("/junction/get_app_user_profile_cars", tags=["junction.user_profile_cars"])
-async def get_app_user_profile_cars(request: Request):
-    return await fetch_all(
-        request, "select * from junction.get_app_user_profile_cars()"
-    )
-
-
-@app.get(
-    "/junction/get_app_user_profile_car_by_uuid", tags=["junction.user_profile_cars"]
-)
-async def get_app_user_profile_car_by_uuid(request: Request, p_id: UUID):
-    return await fetch_one(
-        request, "select * from junction.get_app_user_profile_car_by_uuid($1)", p_id
-    )
-
-
-@app.post("/junction/create_app_user_profile_car", tags=["junction.user_profile_cars"])
-async def create_app_user_profile_car(
-    request: Request, p_app_user_profile_id: UUID, p_car_id: UUID
-):
-    return await fetch_val(
-        request,
-        "select junction.create_app_user_profile_car($1, $2)",
-        p_app_user_profile_id,
-        p_car_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_app_user_profile_car_by_uuid", tags=["junction.user_profile_cars"]
-)
-async def delete_app_user_profile_car_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request, "select junction.delete_app_user_profile_car_by_uuid($1)", p_id
-    )
-
-
-@app.patch(
-    "/junction/restore_app_user_profile_car_by_uuid",
-    tags=["junction.user_profile_cars"],
-)
-async def restore_app_user_profile_car_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request, "select junction.restore_app_user_profile_car_by_uuid($1)", p_id
-    )
-
-
-# ============================================================
-# junction.profile_filter_drive_types
-# ============================================================
-
-
-@app.get(
-    "/junction/get_profile_filter_drive_types",
-    tags=["junction.profile_filter_drive_types"],
-)
-async def get_profile_filter_drive_types(request: Request):
-    return await fetch_all(
-        request, "select * from junction.get_profile_filter_drive_types()"
-    )
-
-
-@app.get(
-    "/junction/get_profile_filter_drive_type_by_uuid",
-    tags=["junction.profile_filter_drive_types"],
-)
-async def get_profile_filter_drive_type_by_uuid(request: Request, p_id: UUID):
-    return await fetch_one(
-        request,
-        "select * from junction.get_profile_filter_drive_type_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.post(
-    "/junction/create_profile_filter_drive_type",
-    tags=["junction.profile_filter_drive_types"],
-)
-async def create_profile_filter_drive_type(
-    request: Request, p_app_user_profile_id: UUID, p_drive_type_id: UUID
-):
-    return await fetch_val(
-        request,
-        "select junction.create_profile_filter_drive_type($1, $2)",
-        p_app_user_profile_id,
-        p_drive_type_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_profile_filter_drive_type_by_uuid",
-    tags=["junction.profile_filter_drive_types"],
-)
-async def delete_profile_filter_drive_type_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request, "select junction.delete_profile_filter_drive_type_by_uuid($1)", p_id
-    )
-
-
-@app.patch(
-    "/junction/restore_profile_filter_drive_type_by_uuid",
-    tags=["junction.profile_filter_drive_types"],
-)
-async def restore_profile_filter_drive_type_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request, "select junction.restore_profile_filter_drive_type_by_uuid($1)", p_id
-    )
-
-
-# ============================================================
-# junction.profile_filter_brands
-# ============================================================
-
-
-@app.get(
-    "/junction/get_profile_filter_brands",
-    tags=["junction.profile_filter_brands"],
-)
-async def get_profile_filter_brands(request: Request):
-    return await fetch_all(
-        request,
-        "select * from junction.get_profile_filter_brands()",
-    )
-
-
-@app.get(
-    "/junction/get_profile_filter_brand_by_uuid",
-    tags=["junction.profile_filter_brands"],
-)
-async def get_profile_filter_brand_by_uuid(request: Request, p_id: UUID):
-    return await fetch_one(
-        request,
-        "select * from junction.get_profile_filter_brand_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.post(
-    "/junction/create_profile_filter_brand",
-    tags=["junction.profile_filter_brands"],
-)
-async def create_profile_filter_brand(
-    request: Request,
-    p_app_user_profile_id: UUID,
-    p_brand_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.create_profile_filter_brand($1, $2)",
-        p_app_user_profile_id,
-        p_brand_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_profile_filter_brand_by_uuid",
-    tags=["junction.profile_filter_brands"],
-)
-async def delete_profile_filter_brand_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request,
-        "select junction.delete_profile_filter_brand_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.patch(
-    "/junction/restore_profile_filter_brand_by_uuid",
-    tags=["junction.profile_filter_brands"],
-)
-async def restore_profile_filter_brand_by_uuid(request: Request, p_id: UUID):
-    return await fetch_val(
-        request,
-        "select junction.restore_profile_filter_brand_by_uuid($1)",
-        p_id,
-    )
-
-
-# ============================================================
-# junction.profile_filter_transmission_types
-# ============================================================
-
-
-@app.get(
-    "/junction/get_profile_filter_transmission_types",
-    tags=["junction.profile_filter_transmission_types"],
-)
-async def get_profile_filter_transmission_types(request: Request):
-    return await fetch_all(
-        request,
-        "select * from junction.get_profile_filter_transmission_types()",
-    )
-
-
-@app.get(
-    "/junction/get_profile_filter_transmission_type_by_uuid",
-    tags=["junction.profile_filter_transmission_types"],
-)
-async def get_profile_filter_transmission_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_one(
-        request,
-        "select * from junction.get_profile_filter_transmission_type_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.post(
-    "/junction/create_profile_filter_transmission_type",
-    tags=["junction.profile_filter_transmission_types"],
-)
-async def create_profile_filter_transmission_type(
-    request: Request,
-    p_app_user_profile_id: UUID,
-    p_transmission_type_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.create_profile_filter_transmission_type($1, $2)",
-        p_app_user_profile_id,
-        p_transmission_type_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_profile_filter_transmission_type_by_uuid",
-    tags=["junction.profile_filter_transmission_types"],
-)
-async def delete_profile_filter_transmission_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.delete_profile_filter_transmission_type_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.patch(
-    "/junction/restore_profile_filter_transmission_type_by_uuid",
-    tags=["junction.profile_filter_transmission_types"],
-)
-async def restore_profile_filter_transmission_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.restore_profile_filter_transmission_type_by_uuid($1)",
-        p_id,
-    )
-
-
-# ============================================================
-# junction.profile_filter_usage_types
-# ============================================================
-
-
-@app.get(
-    "/junction/get_profile_filter_usage_types",
-    tags=["junction.profile_filter_usage_types"],
-)
-async def get_profile_filter_usage_types(request: Request):
-    return await fetch_all(
-        request,
-        "select * from junction.get_profile_filter_usage_types()",
-    )
-
-
-@app.get(
-    "/junction/get_profile_filter_usage_type_by_uuid",
-    tags=["junction.profile_filter_usage_types"],
-)
-async def get_profile_filter_usage_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_one(
-        request,
-        "select * from junction.get_profile_filter_usage_type_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.post(
-    "/junction/create_profile_filter_usage_type",
-    tags=["junction.profile_filter_usage_types"],
-)
-async def create_profile_filter_usage_type(
-    request: Request,
-    p_app_user_profile_id: UUID,
-    p_usage_type_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.create_profile_filter_usage_type($1, $2)",
-        p_app_user_profile_id,
-        p_usage_type_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_profile_filter_usage_type_by_uuid",
-    tags=["junction.profile_filter_usage_types"],
-)
-async def delete_profile_filter_usage_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.delete_profile_filter_usage_type_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.patch(
-    "/junction/restore_profile_filter_usage_type_by_uuid",
-    tags=["junction.profile_filter_usage_types"],
-)
-async def restore_profile_filter_usage_type_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.restore_profile_filter_usage_type_by_uuid($1)",
-        p_id,
-    )
-
-
-# ============================================================
-# junction.profile_filter_capacities
-# ============================================================
-
-
-@app.get(
-    "/junction/get_profile_filter_capacities",
-    tags=["junction.profile_filter_capacities"],
-)
-async def get_profile_filter_capacities(request: Request):
-    return await fetch_all(
-        request,
-        "select * from junction.get_profile_filter_capacities()",
-    )
-
-
-@app.get(
-    "/junction/get_profile_filter_capacity_by_uuid",
-    tags=["junction.profile_filter_capacities"],
-)
-async def get_profile_filter_capacity_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_one(
-        request,
-        "select * from junction.get_profile_filter_capacity_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.post(
-    "/junction/create_profile_filter_capacity",
-    tags=["junction.profile_filter_capacities"],
-)
-async def create_profile_filter_capacity(
-    request: Request,
-    p_app_user_profile_id: UUID,
-    p_capacity_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.create_profile_filter_capacity($1, $2)",
-        p_app_user_profile_id,
-        p_capacity_id,
-    )
-
-
-@app.delete(
-    "/junction/delete_profile_filter_capacity_by_uuid",
-    tags=["junction.profile_filter_capacities"],
-)
-async def delete_profile_filter_capacity_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.delete_profile_filter_capacity_by_uuid($1)",
-        p_id,
-    )
-
-
-@app.patch(
-    "/junction/restore_profile_filter_capacity_by_uuid",
-    tags=["junction.profile_filter_capacities"],
-)
-async def restore_profile_filter_capacity_by_uuid(
-    request: Request,
-    p_id: UUID,
-):
-    return await fetch_val(
-        request,
-        "select junction.restore_profile_filter_capacity_by_uuid($1)",
-        p_id,
     )
