@@ -383,6 +383,66 @@ create index idx_app_user_profile_id_hash
 
 
 -- -------------------------------
+-- create 1 with role user
+-- -------------------------------
+create or replace function profile.create_app_user_profile_as_user(
+    p_name varchar(100)
+)
+returns uuid
+language plpgsql
+as $$
+declare
+    v_id           uuid;
+    v_app_role_id  uuid;
+begin
+    -- [sanitize]
+    p_name := util.sanitize_text(p_name, 'name');
+
+    -- [get default role USER]
+    select r.id
+    into v_app_role_id
+    from app.roles r
+    where lower(r.name) = 'user'
+      and r.is_deleted = false
+    limit 1;
+
+    if v_app_role_id is null then
+        raise exception 'create_app_user_profile_as_user: role USER not found'
+            using errcode = 'no_data_found';
+    end if;
+
+    -- [note] если профиль с таким name удалён → восстанавливаем и обновляем роль
+    select up.id
+    into v_id
+    from profile.user_profiles up
+    where up.name = p_name
+      and up.is_deleted = true;
+
+    if found then
+        update profile.user_profiles
+        set is_deleted  = false,
+            app_role_id = v_app_role_id
+        where id = v_id
+        returning id into v_id;
+
+        return v_id;
+    end if;
+
+    insert into profile.user_profiles (name, app_role_id)
+    values (p_name, v_app_role_id)
+    returning id into v_id;
+
+    return v_id;
+exception
+    when others then
+        raise exception 'create_app_user_profile_as_user: %', sqlerrm
+            using detail  = format('name = %L, app_role_id = %L', p_name, v_app_role_id),
+                  errcode = sqlstate;
+end;
+$$;
+
+
+-- -------------------------------
 -- create 1
 -- -------------------------------
 create or replace function profile.create_app_user_profile(
@@ -2776,6 +2836,8 @@ grant execute on function profile.get_app_user_profile_by_uuid(uuid)
 -- создание / правка / удаление профилей: только admin
 grant execute on function profile.create_app_user_profile(varchar, uuid)
     to role_admin;
+grant execute on function profile.create_app_user_profile_as_user(varchar)
+    to role_guest, role_user, role_admin;
 grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid)
     to role_admin;
 grant execute on function profile.delete_app_user_profile_by_uuid(uuid)
@@ -3017,14 +3079,18 @@ grant execute on function content.get_own_app_order_status_histories_by_order(uu
 -- ── audit.dml_logs (guest –, user –, manager –, admin R) ───────────────────────
 -- читается через прямой SELECT (см. блок TABLE-LEVEL GRANTS ниже)
 
-
 -- ============================================================
 -- TABLE-LEVEL GRANTS
 -- ============================================================
 
+
 -- ── SELECT ───────────────────────────────────────────────────
--- guest: только справочники и автомобили
+
+-- guest: справочники + нужно видеть app.roles/profile/app.users для create_app_user_profile_as_user / create_app_user
 grant select on
+    app.roles,
+    profile.user_profiles,
+    app.users,
     content.brands,
     content.drive_types,
     content.transmission_types,
@@ -3034,8 +3100,9 @@ grant select on
     content.cars
 to role_guest;
 
--- user: таблицы, с которыми он работает
+-- user: всё что читает + app.roles для create_app_user_profile_as_user
 grant select on
+    app.roles,
     profile.user_profiles,
     app.users,
     content.brands,
@@ -3052,7 +3119,7 @@ grant select on
     content.order_status_histories
 to role_user;
 
--- manager: всё как у user + роли
+-- manager: всё как у user (app.roles уже включён)
 grant select on
     app.roles,
     profile.user_profiles,
@@ -3093,15 +3160,21 @@ to role_admin;
 
 
 -- ── INSERT ───────────────────────────────────────────────────
--- guest ничего не вставляет напрямую
 
--- user: создаёт app.users и content.requests
+-- guest: создаёт профиль и себя как пользователя
 grant insert on
+    profile.user_profiles,
+    app.users
+to role_guest;
+
+-- user: создаёт профиль, заявки
+grant insert on
+    profile.user_profiles,
     app.users,
     content.requests
 to role_user;
 
--- manager: создаёт справочники, авто, заказы, статусы, истории
+-- manager: справочники, заказы, статусы, истории
 grant insert on
     profile.user_profiles,
     app.users,
@@ -3118,7 +3191,7 @@ grant insert on
     content.order_status_histories
 to role_manager;
 
--- admin: то же + roles, requests
+-- admin: всё включая roles и requests
 grant insert on
     app.roles,
     profile.user_profiles,
@@ -3139,8 +3212,19 @@ to role_admin;
 
 
 -- ── UPDATE ───────────────────────────────────────────────────
--- истории и dml_logs без UPDATE напрямую
 
+-- guest: update нужен для restore-ветки в create_app_user_profile_as_user и create_app_user
+grant update on
+    profile.user_profiles,
+    app.users
+to role_guest;
+
+-- user: restore-ветка в create_app_user_profile_as_user
+grant update on
+    profile.user_profiles
+to role_user;
+
+-- manager: справочники, авто, заказы, статусы
 grant update on
     profile.user_profiles,
     app.users,
@@ -3155,6 +3239,7 @@ grant update on
     content.statuses
 to role_manager;
 
+-- admin: всё
 grant update on
     app.roles,
     profile.user_profiles,
@@ -3172,13 +3257,7 @@ to role_admin;
 
 
 -- ── DELETE ───────────────────────────────────────────────────
--- физический DELETE — только там, где в матрице есть D
--- (D в матрице есть только у admin, и только на:
---  app.roles, profile.user_profiles, app.users,
---  content.brands, content.drive_types, content.transmission_types,
---  content.usage_types, content.capacity_types, content.capacities,
---  content.cars, content.requests, content.orders, content.statuses)
-
+-- физический DELETE только у admin по матрице
 grant delete on
     app.roles,
     profile.user_profiles,
