@@ -481,54 +481,6 @@ $$;
 
 
 -- -------------------------------
--- get own
--- -------------------------------
-create or replace function profile.get_own_app_user_profile(
-    p_current_user_id uuid
-)
-returns profile.user_profiles
-language plpgsql
-as $$
-declare
-    v_user app.users;
-    v_profile profile.user_profiles;
-begin
-    -- 1) находим активного пользователя
-    select *
-    into v_user
-    from app.users
-    where id = p_current_user_id
-      and is_deleted = false;
-
-    if not found then
-        raise exception 'get_own_app_user_profile: user not found, id = %', p_current_user_id
-            using errcode = 'no_data_found';
-    end if;
-
-    -- 2) находим профиль по FK
-    select *
-    into v_profile
-    from profile.user_profiles
-    where id = v_user.app_user_profile_id
-      and is_deleted = false;
-
-    if not found then
-        raise exception 'get_own_app_user_profile: profile not found, id = %',
-            v_user.app_user_profile_id
-            using errcode = 'no_data_found';
-    end if;
-
-    return v_profile;
-exception
-    when others then
-        raise exception 'get_own_app_user_profile: %', sqlerrm
-            using detail  = format('current_user_id = %L', p_current_user_id),
-                  errcode = sqlstate;
-end;
-$$;
-
-
--- -------------------------------
 -- update 1
 -- -------------------------------
 create or replace function profile.update_app_user_profile_by_uuid(
@@ -628,6 +580,58 @@ create index idx_app_user_id_hash
 
 create index if not exists idx_app_user_profile_id_hash2
     on app.users using hash (app_user_profile_id);
+
+
+
+-- -------------------------------
+-- APP_USER_PROFILE get own
+-- -------------------------------
+create or replace function profile.get_own_app_user_profile(
+    p_current_user_id uuid
+)
+returns profile.user_profiles
+language plpgsql
+as $$
+declare
+    v_user app.users;
+    v_profile profile.user_profiles;
+begin
+    -- 1) находим активного пользователя
+    select *
+    into v_user
+    from app.users
+    where id = p_current_user_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_user_profile: user not found, id = %', p_current_user_id
+            using errcode = 'no_data_found';
+    end if;
+
+    -- 2) находим профиль по FK
+    select *
+    into v_profile
+    from profile.user_profiles
+    where id = v_user.app_user_profile_id
+      and is_deleted = false;
+
+    if not found then
+        raise exception 'get_own_app_user_profile: profile not found, id = %',
+            v_user.app_user_profile_id
+            using errcode = 'no_data_found';
+    end if;
+
+    return v_profile;
+exception
+    when others then
+        raise exception 'get_own_app_user_profile: %', sqlerrm
+            using detail  = format('current_user_id = %L', p_current_user_id),
+                  errcode = sqlstate;
+end;
+$$;
+-- -------------------------------
+-- APP_USER_PROFILE get own
+-- -------------------------------
 
 
 -- -------------------------------
@@ -2770,9 +2774,9 @@ grant execute on function profile.get_app_user_profile_by_uuid(uuid)
     to role_manager, role_admin;
 
 -- создание / правка / удаление профилей: только admin
-grant execute on function profile.create_app_user_profile(varchar)
+grant execute on function profile.create_app_user_profile(varchar, uuid)
     to role_admin;
-grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar)
+grant execute on function profile.update_app_user_profile_by_uuid(uuid, varchar, uuid)
     to role_admin;
 grant execute on function profile.delete_app_user_profile_by_uuid(uuid)
     to role_admin;
@@ -2792,10 +2796,10 @@ grant execute on function app.get_app_user_by_uuid(uuid)
     to role_manager, role_admin;
 
 -- создание пользователей: гость создаёт себя, admin может создавать любых
-grant execute on function app.create_app_user(varchar)
+grant execute on function app.create_app_user(varchar, varchar, uuid)
     to role_guest, role_admin;
 
-grant execute on function app.update_app_user_by_uuid(uuid, varchar)
+grant execute on function app.update_app_user_by_uuid(uuid, varchar, varchar, uuid)
     to role_admin;
 grant execute on function app.delete_app_user_by_uuid(uuid)
     to role_admin;
@@ -2910,9 +2914,9 @@ grant execute on function content.get_car_by_uuid(uuid)
     to role_guest, role_user, role_manager, role_admin;
 
 -- создавать/менять/удалять машины может только admin (manager по матрице только R)
-grant execute on function content.create_car(varchar)
+grant execute on function content.create_car(varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid)
     to role_admin;
-grant execute on function content.update_car_by_uuid(uuid, varchar)
+grant execute on function content.update_car_by_uuid(uuid, varchar, numeric, date, varchar, text, uuid, uuid, uuid, uuid, uuid)
     to role_admin;
 grant execute on function content.delete_car_by_uuid(uuid)
     to role_admin;
@@ -2948,7 +2952,7 @@ grant execute on function content.get_app_order_by_uuid(uuid)
     to role_manager, role_admin;
 
 -- создание заказов: только manager (C у manager, admin по матрице не C)
-grant execute on function content.create_app_order(date, int, numeric)
+grant execute on function content.create_app_order(date, int, numeric, uuid, uuid, uuid, text)
     to role_manager;
 
 -- U/D по матрице нет ни у кого => функции update/delete/restore не выдаём
@@ -3239,104 +3243,104 @@ to role_admin;
 --     data text not null
 -- );
 
-create or replace procedure content.export_cars_to_json()
-language plpgsql
-as $$
-begin
-    truncate table util.export_buffer;
+-- create or replace procedure content.export_cars_to_json()
+-- language plpgsql
+-- as $$
+-- begin
+--     truncate table util.export_buffer;
 
-    insert into util.export_buffer(data)
-    select coalesce(
-               jsonb_agg(
-                   jsonb_build_object(
-                       'id', c.id,
-                       'name', c.name,
-                       'price_of_origin', c.price_of_origin,
-                       'manufacture_date', c.manufacture_date,
-                       'country_of_origin', c.country_of_origin,
-                       'description', c.description,
-                       'is_deleted', c.is_deleted,
-                       'brand_id', c.brand_id,
-                       'drive_type_id', c.drive_type_id,
-                       'transmission_type_id', c.transmission_type_id,
-                       'usage_type_id', c.usage_type_id,
-                       'capacity_id', c.capacity_id
-                   )
-               ),
-               '[]'::jsonb
-           )::text
-    from content.cars c
-    where c.is_deleted = false;
-end;
-$$;
+--     insert into util.export_buffer(data)
+--     select coalesce(
+--                jsonb_agg(
+--                    jsonb_build_object(
+--                        'id', c.id,
+--                        'name', c.name,
+--                        'price_of_origin', c.price_of_origin,
+--                        'manufacture_date', c.manufacture_date,
+--                        'country_of_origin', c.country_of_origin,
+--                        'description', c.description,
+--                        'is_deleted', c.is_deleted,
+--                        'brand_id', c.brand_id,
+--                        'drive_type_id', c.drive_type_id,
+--                        'transmission_type_id', c.transmission_type_id,
+--                        'usage_type_id', c.usage_type_id,
+--                        'capacity_id', c.capacity_id
+--                    )
+--                ),
+--                '[]'::jsonb
+--            )::text
+--     from content.cars c
+--     where c.is_deleted = false;
+-- end;
+-- $$;
 
-create or replace procedure content.import_cars_from_json(p_file_path text)
-language plpgsql
-as $$
-begin
-    create temp table if not exists tmp_json_import (
-        data jsonb
-    ) on commit drop;
+-- create or replace procedure content.import_cars_from_json(p_file_path text)
+-- language plpgsql
+-- as $$
+-- begin
+--     create temp table if not exists tmp_json_import (
+--         data jsonb
+--     ) on commit drop;
 
-    truncate table tmp_json_import;
+--     truncate table tmp_json_import;
 
-    execute format(
-        'copy tmp_json_import(data) from %L',
-        p_file_path
-    );
+--     execute format(
+--         'copy tmp_json_import(data) from %L',
+--         p_file_path
+--     );
 
-    if not exists (select 1 from tmp_json_import) then
-        raise exception 'Файл импорта пуст или не был загружен: %', p_file_path;
-    end if;
+--     if not exists (select 1 from tmp_json_import) then
+--         raise exception 'Файл импорта пуст или не был загружен: %', p_file_path;
+--     end if;
 
-    insert into content.cars (
-        name,
-        price_of_origin,
-        manufacture_date,
-        country_of_origin,
-        description,
-        brand_id,
-        drive_type_id,
-        transmission_type_id,
-        usage_type_id,
-        capacity_id
-    )
-    select
-        x.name,
-        x.price_of_origin,
-        x.manufacture_date,
-        x.country_of_origin,
-        x.description,
-        x.brand_id,
-        x.drive_type_id,
-        x.transmission_type_id,
-        x.usage_type_id,
-        x.capacity_id
-    from tmp_json_import t,
-         jsonb_to_recordset(t.data) as x(
-             name varchar(100),
-             price_of_origin numeric(12,2),
-             manufacture_date date,
-             country_of_origin varchar(100),
-             description text,
-             brand_id uuid,
-             drive_type_id uuid,
-             transmission_type_id uuid,
-             usage_type_id uuid,
-             capacity_id uuid
-         );
-end;
-$$;
+--     insert into content.cars (
+--         name,
+--         price_of_origin,
+--         manufacture_date,
+--         country_of_origin,
+--         description,
+--         brand_id,
+--         drive_type_id,
+--         transmission_type_id,
+--         usage_type_id,
+--         capacity_id
+--     )
+--     select
+--         x.name,
+--         x.price_of_origin,
+--         x.manufacture_date,
+--         x.country_of_origin,
+--         x.description,
+--         x.brand_id,
+--         x.drive_type_id,
+--         x.transmission_type_id,
+--         x.usage_type_id,
+--         x.capacity_id
+--     from tmp_json_import t,
+--          jsonb_to_recordset(t.data) as x(
+--              name varchar(100),
+--              price_of_origin numeric(12,2),
+--              manufacture_date date,
+--              country_of_origin varchar(100),
+--              description text,
+--              brand_id uuid,
+--              drive_type_id uuid,
+--              transmission_type_id uuid,
+--              usage_type_id uuid,
+--              capacity_id uuid
+--          );
+-- end;
+-- $$;
 
 
-call content.export_cars_to_json();
-copy (
-    select data from util.export_buffer
-) to '/var/lib/postgresql/18/docker/cars.json';
-truncate table content.cars cascade;
+-- call content.export_cars_to_json();
+-- copy (
+--     select data from util.export_buffer
+-- ) to '/var/lib/postgresql/18/docker/cars.json';
+-- truncate table content.cars cascade;
 
-select * from content.cars;
-call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
+-- select * from content.cars;
+-- call content.import_cars_from_json('/var/lib/postgresql/18/docker/cars.json');
 
 
 
