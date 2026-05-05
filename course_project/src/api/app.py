@@ -1,11 +1,13 @@
+import logging
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
-app = FastAPI()
+logger = logging.getLogger("uvicorn.error")
 
 DB_HOST = "localhost"
 DB_NAME = "postgres"
@@ -32,6 +34,39 @@ CONNECTIONS = {
 ALLOWED_PORTS = {5432, 5433, 5434}
 DEFAULT_CONN_TYPE = "guest"
 DEFAULT_DB_PORT = 5432
+
+app = FastAPI()
+
+
+@app.middleware("http")
+async def error_handler(request: Request, call_next):
+    try:
+        return await call_next(request)
+
+    except asyncpg.exceptions.InsufficientPrivilegeError as e:
+        logger.warning(
+            "Postgres privilege error: %s %s -> %s",
+            request.method,
+            request.url.path,
+            e,
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"detail": str(e)},
+        )
+
+    except asyncpg.exceptions.PostgresError as e:
+        logger.error(
+            "Postgres error: %s %s -> %s",
+            request.method,
+            request.url.path,
+            e,
+            exc_info=True,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Database error"},
+        )
 
 
 def get_conn_type(request: Request) -> str:
@@ -126,16 +161,6 @@ async def fetch_val(request: Request, sql: str, *args):
 # ============================================================
 # auth / connection
 # ============================================================
-
-
-@app.post("/connect/{conn_type}/{db_port}", tags=["auth"])
-async def connect(conn_type: str, db_port: int, response: Response):
-    set_connection_cookies(response, conn_type, db_port)
-    return {
-        "ok": True,
-        "conn_type": conn_type if conn_type in CONNECTIONS else DEFAULT_CONN_TYPE,
-        "db_port": db_port if db_port in ALLOWED_PORTS else DEFAULT_DB_PORT,
-    }
 
 
 @app.post("/login/{conn_type}", tags=["auth"])
@@ -351,6 +376,15 @@ async def get_own_app_user_profile(request: Request, p_current_user_id: UUID):
 async def create_app_user_profile(request: Request, p_name: str, p_app_role_id: UUID):
     return await fetch_val(
         request, "select profile.create_app_user_profile($1, $2)", p_name, p_app_role_id
+    )
+
+
+@app.post("/profile/create_app_user_profile_as_user", tags=["profile.user_profiles"])
+async def create_app_user_profile_as_user(request: Request, p_name: str):
+    return await fetch_val(
+        request,
+        "select profile.create_app_user_profile_as_user($1)",
+        p_name,
     )
 
 
