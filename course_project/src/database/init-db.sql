@@ -2766,7 +2766,7 @@ grant execute on function app.restore_app_role_by_uuid(uuid)
     to role_admin;
 
 
--- ── profile.userprofiles (guest –, user=RO,U(свой), manager=R, admin=C,R,U,D) ──
+-- ── profile.user_profiles (guest –, user=RO,U(свой), manager=R, admin=C,R,U,D) ──
 -- менеджер и админ видят все профили
 grant execute on function profile.get_app_user_profiles()
     to role_manager, role_admin;
@@ -2827,7 +2827,7 @@ grant execute on function content.restore_brand_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.drivetypes (guest R, user R, manager/admin C,R,U,D) ───────────────
+-- ── content.drive_types (guest R, user R, manager/admin C,R,U,D) ───────────────
 grant execute on function content.get_drive_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_drive_type_by_uuid(uuid)
@@ -2843,7 +2843,7 @@ grant execute on function content.restore_drive_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.transmissiontypes (guest R, user R, manager/admin C,R,U,D) ────────
+-- ── content.transmission_types (guest R, user R, manager/admin C,R,U,D) ────────
 grant execute on function content.get_transmission_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_transmission_type_by_uuid(uuid)
@@ -2859,7 +2859,7 @@ grant execute on function content.restore_transmission_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.usagetypes (guest R, user R, manager/admin C,R,U,D) ───────────────
+-- ── content.usage_types (guest R, user R, manager/admin C,R,U,D) ───────────────
 grant execute on function content.get_usage_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_usage_type_by_uuid(uuid)
@@ -2875,7 +2875,7 @@ grant execute on function content.restore_usage_type_by_uuid(uuid)
     to role_manager, role_admin;
 
 
--- ── content.capacitytypes (guest R, user R, manager/admin C,R,U,D) ────────────
+-- ── content.capacity_types (guest R, user R, manager/admin C,R,U,D) ────────────
 grant execute on function content.get_capacity_types()
     to role_guest, role_user, role_manager, role_admin;
 grant execute on function content.get_capacity_type_by_uuid(uuid)
@@ -2952,7 +2952,7 @@ grant execute on function content.get_app_order_by_uuid(uuid)
     to role_manager, role_admin;
 
 -- создание заказов: только manager (C у manager, admin по матрице не C)
-grant execute on function content.create_app_order(date, int, numeric, uuid, uuid, uuid, text)
+grant execute on function content.create_app_order(date, int, numeric, numeric, uuid, uuid, uuid, text)
     to role_manager;
 
 -- U/D по матрице нет ни у кого => функции update/delete/restore не выдаём
@@ -2981,7 +2981,7 @@ grant execute on function content.restore_app_status_by_uuid(uuid)
     to role_admin;
 
 
--- ── content.requeststatushistories (guest –, user C,RMO(свои), manager C,R, admin R) ──
+-- ── content.request_status_histories (guest –, user C,RMO(свои), manager C,R, admin R) ──
 -- глобальные истории: manager/admin (R)
 grant execute on function content.get_app_request_status_histories()
     to role_manager, role_admin;
@@ -2999,7 +2999,7 @@ grant execute on function content.get_own_app_request_status_histories_by_reques
     to role_user;
 
 
--- ── content.orderstatushistories (guest –, user C,RMO(свои), manager C,R, admin R) ────
+-- ── content.order_status_histories (guest –, user C,RMO(свои), manager C,R, admin R) ────
 grant execute on function content.get_app_order_status_histories()
     to role_manager, role_admin;
 grant execute on function content.get_app_order_status_history_by_uuid(uuid)
@@ -3014,7 +3014,7 @@ grant execute on function content.get_own_app_order_status_histories_by_order(uu
     to role_user;
 
 
--- ── audit.dmllogs (guest –, user –, manager –, admin R) ───────────────────────
+-- ── audit.dml_logs (guest –, user –, manager –, admin R) ───────────────────────
 -- читается через прямой SELECT (см. блок TABLE-LEVEL GRANTS ниже)
 
 
@@ -3026,69 +3026,69 @@ grant execute on function content.get_own_app_order_status_histories_by_order(uu
 -- guest: только справочники и автомобили
 grant select on
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars
 to role_guest;
 
 -- user: таблицы, с которыми он работает
 grant select on
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.requeststatushistories,
-    content.orderstatushistories
+    content.request_status_histories,
+    content.order_status_histories
 to role_user;
 
 -- manager: всё как у user + роли
 grant select on
     app.roles,
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.requeststatushistories,
-    content.orderstatushistories
+    content.request_status_histories,
+    content.order_status_histories
 to role_manager;
 
 -- admin: полный SELECT + журнал аудита
 grant select on
     app.roles,
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.requeststatushistories,
-    content.orderstatushistories,
-    audit.dmllogs
+    content.request_status_histories,
+    content.order_status_histories,
+    audit.dml_logs
 to role_admin;
 
 
@@ -3103,38 +3103,38 @@ to role_user;
 
 -- manager: создаёт справочники, авто, заказы, статусы, истории
 grant insert on
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.orders,
     content.statuses,
-    content.requeststatushistories,
-    content.orderstatushistories
+    content.request_status_histories,
+    content.order_status_histories
 to role_manager;
 
 -- admin: то же + roles, requests
 grant insert on
     app.roles,
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.requests,
     content.orders,
     content.statuses,
-    content.requeststatushistories,
-    content.orderstatushistories
+    content.request_status_histories,
+    content.order_status_histories
 to role_admin;
 
 
@@ -3142,13 +3142,13 @@ to role_admin;
 -- истории и dml_logs без UPDATE напрямую
 
 grant update on
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.orders,
@@ -3157,13 +3157,13 @@ to role_manager;
 
 grant update on
     app.roles,
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.orders,
@@ -3174,20 +3174,20 @@ to role_admin;
 -- ── DELETE ───────────────────────────────────────────────────
 -- физический DELETE — только там, где в матрице есть D
 -- (D в матрице есть только у admin, и только на:
---  app.roles, profile.userprofiles, app.users,
---  content.brands, content.drivetypes, content.transmissiontypes,
---  content.usagetypes, content.capacitytypes, content.capacities,
+--  app.roles, profile.user_profiles, app.users,
+--  content.brands, content.drive_types, content.transmission_types,
+--  content.usage_types, content.capacity_types, content.capacities,
 --  content.cars, content.requests, content.orders, content.statuses)
 
 grant delete on
     app.roles,
-    profile.userprofiles,
+    profile.user_profiles,
     app.users,
     content.brands,
-    content.drivetypes,
-    content.transmissiontypes,
-    content.usagetypes,
-    content.capacitytypes,
+    content.drive_types,
+    content.transmission_types,
+    content.usage_types,
+    content.capacity_types,
     content.capacities,
     content.cars,
     content.requests,
